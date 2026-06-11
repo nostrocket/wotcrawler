@@ -89,13 +89,41 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (populated by roadmap) | | |
+| INGEST-01 | Phase 2 | Pending |
+| INGEST-02 | Phase 2 | Pending |
+| INGEST-03 | Phase 2 | Pending |
+| INGEST-04 | Phase 2 | Pending |
+| INGEST-05 | Phase 2 | Pending |
+| RELAY-01 | Phase 2 | Pending |
+| RELAY-02 | Phase 2 | Pending |
+| RELAY-03 | Phase 2 | Pending |
+| RELAY-04 | Phase 2 | Pending |
+| RELAY-05 | Phase 5 | Pending |
+| RELAY-06 | Phase 5 | Pending |
+| GRAPH-01 | Phase 1 | Pending |
+| GRAPH-02 | Phase 3 | Pending |
+| GRAPH-03 | Phase 1 | Pending |
+| GRAPH-04 | Phase 1 | Pending |
+| CRAWL-01 | Phase 3 | Pending |
+| CRAWL-02 | Phase 3 | Pending |
+| CRAWL-03 | Phase 3 | Pending |
+| CRAWL-04 | Phase 3 | Pending |
+| FRESH-01 | Phase 3 | Pending |
+| FRESH-02 | Phase 4 | Pending |
+| FRESH-03 | Phase 4 | Pending |
+| OBS-01 | Phase 4 | Pending |
+| OBS-02 | Phase 4 | Pending |
+| OBS-03 | Phase 4 | Pending |
+| OBS-04 | Phase 4 | Pending |
+| OBS-05 | Phase 4 | Pending |
+| OPS-01 | Phase 4 | Pending |
+| OPS-02 | Phase 4 | Pending |
 
 **Coverage:**
 - v1 requirements: 29 total
-- Mapped to phases: 0
-- Unmapped: 29 ⚠️
+- Mapped to phases: 29
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-11*
-*Last updated: 2026-06-11 after initial definition*
+*Last updated: 2026-06-11 after roadmap creation*
