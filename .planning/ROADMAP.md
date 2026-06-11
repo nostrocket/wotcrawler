@@ -29,7 +29,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. The schema stores pubkeys with surrogate bigint IDs, directed follow edges keyed on those IDs, and per-pubkey freshness columns.
   3. A second process can run read queries against the graph while the crawler's store layer writes, with neither blocking the other.
   4. A committed schema document describes every table and column a downstream consumer reads, sufficient for the spam layer to query without reading crawler code.
-**Plans**: TBD
+**Plans**: 3 plans
+  - [ ] 01-01-PLAN.md — Toolchain + project scaffold + testcontainers Postgres fixture
+  - [ ] 01-02-PLAN.md — Idempotent graph schema migration + contract views + COMMENT ON + migration/contract tests
+  - [ ] 01-03-PLAN.md — sqlx store layer (pubkeys + edge-diff writer) + concurrency test + SCHEMA.md + .sqlx metadata
 
 ### Phase 2: Relay Acquisition & Validation
 **Goal**: The crawler can pull kind-3 and kind:10002 events from a curated relay set politely and completely, and only correct, deduplicated, newest-wins follow lists emerge from the acquisition half.
@@ -84,7 +87,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Schema & Data Contract | 0/TBD | Not started | - |
+| 1. Schema & Data Contract | 0/3 | Not started | - |
 | 2. Relay Acquisition & Validation | 0/TBD | Not started | - |
 | 3. Graph Writer & BFS Frontier | 0/TBD | Not started | - |
 | 4. Daemon, Staleness Loop & Observability | 0/TBD | Not started | - |
