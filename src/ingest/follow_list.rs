@@ -1,0 +1,26 @@
+//! p-tag extraction, dedup, self-drop, and bounded cap (INGEST-04).
+//!
+//! Given the winning kind-3 event, extract its followee pubkeys via
+//! `Tags::public_keys()` (which skips malformed/non-standard p-tags
+//! automatically — Pitfall 6), dedup the set (a kind-3 may legally repeat a
+//! p-tag), drop self-follows (D-08, defense in depth — the store drops them
+//! too), and enforce the configurable `follow_cap`. Per the resolved Open
+//! Question 4, the default disposition on an oversized list is REJECT-and-count
+//! (`ingest_oversized_follow_list`), not silent truncation, because a 50k-tag
+//! event is almost certainly a follow-bomb. Relay hints + petnames on p-tags
+//! are discarded — only the pubkey set crosses into the store (D-06).
+//!
+//! Stub body in plan 02-01; implemented in plan 02-02 Task 3.
+
+use nostr_sdk::{Event, PublicKey};
+
+/// Extract the bounded, deduplicated, self-filtered followee set from a winning
+/// kind-3 event.
+///
+/// Returns `Some(pubkeys)` when the extracted list is within `follow_cap`, or
+/// `None` when it exceeds the cap (the default reject-and-count disposition,
+/// Open Question 4). Never `unwrap()`s on tag contents — adversarial input must
+/// never panic the pipeline.
+pub fn followee_pubkeys(_event: &Event, _follow_cap: usize) -> Option<Vec<PublicKey>> {
+    todo!("plan 02-02 Task 3: public_keys() -> dedup -> self-drop -> cap")
+}
