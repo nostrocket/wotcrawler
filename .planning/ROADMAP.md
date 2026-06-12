@@ -66,7 +66,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 2** *(blocked on Wave 1 completion; 02-02 and 02-03 run in parallel — disjoint files)*
 
-  - [ ] 02-02-PLAN.md — Ingest validation: verify gate, dedup, replaceable resolution, p-tag bounds (INGEST-01..05)
+  - [x] 02-02-PLAN.md — Ingest validation: verify gate, dedup, replaceable resolution, p-tag bounds (INGEST-01..05)
   - [ ] 02-03-PLAN.md — Relay acquisition: reconnect+backoff, NIP-11 cache, governor rate limit, until-window pagination (RELAY-01..04)
 
 **Wave 3** *(blocked on Wave 2; wires the two halves together)*

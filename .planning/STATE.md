@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-06-12T13:02:37.378Z"
-last_activity: 2026-06-12 -- Completed 02-01 (relay/ingest foundation + spikes)
+stopped_at: Completed 02-02-PLAN.md
+last_updated: "2026-06-12T13:22:00.000Z"
+last_activity: 2026-06-12 -- Completed 02-02 (ingest validation gate — INGEST-01..05)
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 8
-  completed_plans: 4
-  percent: 25
+  completed_plans: 5
+  percent: 31
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 ## Current Position
 
 Phase: 02 (relay-acquisition-validation) — EXECUTING
-Plan: 2 of 4
-Status: Executing Phase 02 (02-01 complete; Wave 2 — 02-02/02-03 next, parallel)
-Last activity: 2026-06-12 -- Completed 02-01 (relay/ingest foundation + spikes)
+Plan: 3 of 4
+Status: Executing Phase 02 (02-01 + 02-02 complete; 02-03 relay transport next, then 02-04 acquire pipeline)
+Last activity: 2026-06-12 -- Completed 02-02 (ingest validation gate — INGEST-01..05)
 
-Progress: [██░░░░░░░░] 25%
+Progress: [███░░░░░░░] 31%
 
 ## Performance Metrics
 
@@ -56,6 +56,7 @@ Progress: [██░░░░░░░░] 25%
 | Phase 01 P02 | 2 | 3 tasks | 3 files |
 | Phase 01 P03 | 9 | 3 tasks | 10 files |
 | Phase 02 P01 | 18 | 4 tasks | 14 files |
+| Phase 02 P02 | 6 | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -73,6 +74,7 @@ Recent decisions affecting current work:
 - [Phase 2]: [02-01] Foundation shipped: nostr-sdk 0.44 / governor 0.10 / metrics 0.24 added (compiles on toolchain 1.94); relay + ingest module trees registered with stubs; RelayError/IngestError enums (count-and-skip vs genuine-error split); ValidatedFollowList output contract; offline nostr event fixtures.
 - [Phase 2]: [02-01 SPIKE RELAY-01] nostr-relay-pool 0.44.1 reconnect is LINEAR (1 + diff/2) with ±3s jitter + 60s cap, NOT exponential — plan 02-03 MUST add an app-side capped-exponential-with-jitter backoff for fetch re-arm; SDK socket reconnect kept on. RELAY-01 not satisfied on SDK default alone.
 - [Phase 2]: [02-01 SPIKE RELAY-02] No SDK NIP-11 accessor (RelayInformationDocument is parse-only; reqwest dev-dep only) — plan 02-03 MUST add reqwest + GET Accept: application/nostr+json; defaults max_limit=500 / max_subscriptions=20 / max_filters=10 when omitted.
+- [Phase 2]: [02-02] Ingest validation gate shipped (INGEST-01..05): verify::accept (Event::verify id+sig + kind/author gate), cross-relay HashSet<EventId> dedup orchestrator, kind-agnostic pick_winner (future-clamp + newest-wins + lowest-id tie-break, EventId derives Ord), reject-not-truncate followee extraction. 16 offline tests green. ingest_events gained a requested-author-set parameter the 02-01 stub omitted.
 
 ### Pending Todos
 
@@ -93,6 +95,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-12T13:02:37.378Z
-Stopped at: Completed 02-01-PLAN.md
-Resume file: .planning/phases/02-relay-acquisition-validation/02-02-PLAN.md (Wave 2; 02-02 and 02-03 run in parallel)
+Last session: 2026-06-12T13:22:00.000Z
+Stopped at: Completed 02-02-PLAN.md
+Resume file: .planning/phases/02-relay-acquisition-validation/02-03-PLAN.md (relay transport — NIP-11 + reqwest + app-side backoff per the 02-01 spikes)

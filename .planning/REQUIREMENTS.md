@@ -9,11 +9,11 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Ingest & Validation
 
-- [ ] **INGEST-01**: Every event's signature is verified against its pubkey before anything is stored; invalid events are discarded and counted
-- [ ] **INGEST-02**: Duplicate events (same id arriving from multiple relays) are processed at most once
-- [ ] **INGEST-03**: For each pubkey, only the newest valid kind-3 event is applied — future-dated `created_at` is rejected (configurable clamp, e.g. >1h ahead), same-timestamp ties break to lowest event id
-- [ ] **INGEST-04**: Malformed p-tags are skipped and oversized follow lists are bounded by a configurable cap without crashing the pipeline
-- [ ] **INGEST-05**: kind:10002 (NIP-65) relay-list events are ingested and validated under the same replaceable-event rules
+- [x] **INGEST-01**: Every event's signature is verified against its pubkey before anything is stored; invalid events are discarded and counted
+- [x] **INGEST-02**: Duplicate events (same id arriving from multiple relays) are processed at most once
+- [x] **INGEST-03**: For each pubkey, only the newest valid kind-3 event is applied — future-dated `created_at` is rejected (configurable clamp, e.g. >1h ahead), same-timestamp ties break to lowest event id
+- [x] **INGEST-04**: Malformed p-tags are skipped and oversized follow lists are bounded by a configurable cap without crashing the pipeline
+- [x] **INGEST-05**: kind:10002 (NIP-65) relay-list events are ingested and validated under the same replaceable-event rules
 
 ### Relay Acquisition
 
@@ -89,11 +89,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INGEST-01 | Phase 2 | Pending |
-| INGEST-02 | Phase 2 | Pending |
-| INGEST-03 | Phase 2 | Pending |
-| INGEST-04 | Phase 2 | Pending |
-| INGEST-05 | Phase 2 | Pending |
+| INGEST-01 | Phase 2 | Complete |
+| INGEST-02 | Phase 2 | Complete |
+| INGEST-03 | Phase 2 | Complete |
+| INGEST-04 | Phase 2 | Complete |
+| INGEST-05 | Phase 2 | Complete |
 | RELAY-01 | Phase 2 | Pending |
 | RELAY-02 | Phase 2 | Pending |
 | RELAY-03 | Phase 2 | Pending |
