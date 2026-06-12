@@ -13,7 +13,7 @@ From one anchor pubkey, this project builds and continuously refreshes a complet
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Schema & Data Contract** - PostgreSQL graph schema, sqlx store layer, versioned migrations, documented public contract
+- [x] **Phase 1: Schema & Data Contract** - PostgreSQL graph schema, sqlx store layer, versioned migrations, documented public contract (completed 2026-06-12)
 - [ ] **Phase 2: Relay Acquisition & Validation** - Curated relay pool with backoff/NIP-11 awareness feeding a signature-verifying, replaceable-event-resolving validator
 - [ ] **Phase 3: Graph Writer & BFS Frontier** - Transactional edge-diff writer and DB-resident reachability-gated BFS frontier that survives restarts
 - [ ] **Phase 4: Daemon, Staleness Loop & Observability** - One long-running daemon with TTL-driven refresh and the metrics/logging/health surface an operator trusts unattended
@@ -43,7 +43,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-  - [ ] 01-03-PLAN.md — sqlx store layer (pubkeys + edge-diff writer) + concurrency test + SCHEMA.md + .sqlx metadata
+  - [x] 01-03-PLAN.md — sqlx store layer (pubkeys + edge-diff writer) + concurrency test + SCHEMA.md + .sqlx metadata
 
 ### Phase 2: Relay Acquisition & Validation
 
@@ -110,7 +110,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Schema & Data Contract | 2/3 | In Progress|  |
+| 1. Schema & Data Contract | 3/3 | Complete   | 2026-06-12 |
 | 2. Relay Acquisition & Validation | 0/TBD | Not started | - |
 | 3. Graph Writer & BFS Frontier | 0/TBD | Not started | - |
 | 4. Daemon, Staleness Loop & Observability | 0/TBD | Not started | - |
