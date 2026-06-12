@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 1 context gathered
-last_updated: "2026-06-12T06:51:35.647Z"
-last_activity: 2026-06-12 -- Phase 01 execution started
+stopped_at: Completed 01-02-PLAN.md
+last_updated: "2026-06-12T06:54:56Z"
+last_activity: 2026-06-12 -- Completed 01-02 graph schema migration + contract views
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 3
-  completed_plans: 1
-  percent: 0
+  completed_plans: 2
+  percent: 13
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 ## Current Position
 
 Phase: 01 (schema-data-contract) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
-Last activity: 2026-06-12 -- Phase 01 execution started
+Last activity: 2026-06-12 -- Completed 01-02 graph schema migration + contract views
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█░░░░░░░░░] 13%
 
 ## Performance Metrics
 
@@ -53,6 +53,7 @@ Progress: [░░░░░░░░░░] 0%
 
 *Updated after each plan completion*
 | Phase 01 P01 | 120 | 3 tasks | 9 files |
+| Phase 01 P02 | 2 | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -65,6 +66,7 @@ Recent decisions affecting current work:
 - [Roadmap]: RELAY-05 (NIP-65 fallback) and RELAY-06 (relay health) kept in v1 per user override (research suggested deferring); both land in Phase 5, gated behind Phase 4 coverage metrics.
 - [Roadmap]: FRESH-04 (adaptive refresh) stays v2 — no public kind-3 churn data exists; needs weeks of FRESH-03 instrumentation first.
 - [Phase ?]: [01-01] Pinned Rust toolchain to 1.94.0 (sqlx 0.9 MSRV) per RESEARCH MSRV correction.
+- [Phase 1]: [01-02] Phase 1 schema shipped as single idempotent migration 0001_graph_schema.sql; status stored as TEXT+CHECK (not native enum, D-09); contract = 3 views (follow_edges, pubkey_lookup, pubkey_freshness) with PUBLIC CONTRACT COMMENT ON; freshness/churn/applied columns shipped now to avoid later migrations on the big table (D-07/D-10).
 
 ### Pending Todos
 
@@ -85,6 +87,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-12T06:51:29.902Z
-Stopped at: Phase 1 context gathered
-Resume file: .planning/phases/01-schema-data-contract/01-CONTEXT.md
+Last session: 2026-06-12T06:54:56Z
+Stopped at: Completed 01-02-PLAN.md
+Resume file: .planning/phases/01-schema-data-contract/01-03-PLAN.md
