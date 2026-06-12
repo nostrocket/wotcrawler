@@ -21,6 +21,26 @@ use nostr_sdk::{Event, Kind, PublicKey};
 /// `kind == want_kind` and `pubkey ∈ requested`; otherwise increments the
 /// relevant `metrics` counter (`ingest_invalid_signature` / `ingest_unsolicited`)
 /// and returns `false`.
-pub fn accept(_event: &Event, _want_kind: Kind, _requested: &HashSet<PublicKey>) -> bool {
-    todo!("plan 02-02 Task 1: Event::verify() + kind/author match gate")
+///
+/// `Event::verify()` (NOT `verify_signature()` alone) is used so that a relay
+/// returning an event whose stored id does not match its content is caught: the
+/// method recomputes the id AND checks the secp256k1 signature (RESEARCH
+/// Pattern 4). No field is `unwrap()`-ed — adversarial input must never panic
+/// (V5/V7).
+pub fn accept(event: &Event, want_kind: Kind, requested: &HashSet<PublicKey>) -> bool {
+    // Step 1: id recomputation + secp256k1 signature. A forged event (content
+    // mutated after signing) fails id recomputation here.
+    if event.verify().is_err() {
+        metrics::counter!("ingest_invalid_signature").increment(1);
+        return false;
+    }
+
+    // Step 2: relays are adversarial and may inject events of a kind we never
+    // asked for, or authored by a pubkey outside the requested set (Pitfall 4).
+    if event.kind != want_kind || !requested.contains(&event.pubkey) {
+        metrics::counter!("ingest_unsolicited").increment(1);
+        return false;
+    }
+
+    true
 }

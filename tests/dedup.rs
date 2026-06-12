@@ -7,6 +7,8 @@
 
 mod common;
 
+use std::collections::HashSet;
+
 use nostr_sdk::{Kind, Timestamp};
 use web_of_trust::ingest::ingest_events;
 
@@ -25,9 +27,13 @@ fn duplicate_event_id_processed_once() {
     // Two relays return the identical event (same id).
     let batch = vec![event.clone(), event.clone()];
 
+    let mut requested = HashSet::new();
+    requested.insert(author.public_key());
+
     let results = ingest_events(
         batch,
         Kind::ContactList,
+        &requested,
         Timestamp::now(),
         3600,
         50_000,

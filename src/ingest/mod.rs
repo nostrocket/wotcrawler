@@ -20,6 +20,8 @@ pub mod follow_list;
 pub mod replaceable;
 pub mod verify;
 
+use std::collections::{HashMap, HashSet};
+
 use chrono::{DateTime, TimeZone, Utc};
 use nostr_sdk::{Event, EventId, Kind, PublicKey, Timestamp};
 
@@ -88,18 +90,68 @@ impl ValidatedFollowList {
 /// and emit one [`ValidatedFollowList`] per author whose newest valid event of
 /// `want_kind` survives.
 ///
-/// Pipeline (plan 02-02 fills the body): verify each event ([`verify::accept`]),
-/// drop unsolicited kinds/authors, dedup by id, group by author, resolve the
-/// replaceable winner per author ([`replaceable::pick_winner`]), extract and
-/// bound its followees ([`follow_list::followee_pubkeys`]), and build the
-/// contract value. `want_kind` is `Kind::ContactList` (3) or `Kind::RelayList`
-/// (10002, validated under the identical rules — INGEST-05).
+/// Pipeline: dedup by id (cross-relay [`HashSet<EventId>`] seen-set, INGEST-02)
+/// -> verify + kind/author gate ([`verify::accept`], INGEST-01) -> group by
+/// author -> resolve the replaceable winner per author ([`replaceable::pick_winner`],
+/// INGEST-03/05) -> extract and bound its followees
+/// ([`follow_list::followee_pubkeys`], INGEST-04) -> build the contract value.
+///
+/// `want_kind` is `Kind::ContactList` (3) or `Kind::RelayList` (10002, validated
+/// under the identical rules — INGEST-05). `requested` is the set of authors the
+/// fetch actually asked for; events from any other author are dropped as
+/// unsolicited (Pitfall 4). `now` + `future_clamp_secs` drive the future clamp;
+/// `follow_cap` bounds an oversized follow list.
+///
+/// Because every event in a group has already passed the gate (verified id +
+/// matching kind + solicited author), the same resolver and extractor handle
+/// kind:3 and kind:10002 identically — for kind:10002 the returned
+/// [`ValidatedFollowList::followee_pubkeys`] are the relay-list p-tag pubkeys;
+/// callers wanting the relay urls re-parse the winning event.
 pub fn ingest_events(
-    _events: impl IntoIterator<Item = Event>,
-    _want_kind: Kind,
-    _now: Timestamp,
-    _future_clamp_secs: u64,
-    _follow_cap: usize,
+    events: impl IntoIterator<Item = Event>,
+    want_kind: Kind,
+    requested: &HashSet<PublicKey>,
+    now: Timestamp,
+    future_clamp_secs: u64,
+    follow_cap: usize,
 ) -> Vec<ValidatedFollowList> {
-    todo!("plan 02-02: orchestrate verify -> dedup -> resolve -> extract -> emit")
+    // Cross-relay dedup: each event id is processed at most once even if two
+    // relays return it (INGEST-02). `fetch_events` dedupes within one call; this
+    // covers the multi-call / multi-relay path.
+    let mut seen: HashSet<EventId> = HashSet::new();
+
+    // Group surviving events by author so the replaceable resolver runs per
+    // pubkey. All events here share `want_kind` (the gate enforces it), so the
+    // (pubkey, kind) grouping collapses to grouping by pubkey.
+    let mut by_author: HashMap<PublicKey, Vec<Event>> = HashMap::new();
+
+    for event in events {
+        if !seen.insert(event.id) {
+            continue; // duplicate id from another relay — already handled.
+        }
+        if !verify::accept(&event, want_kind, requested) {
+            continue; // forged or unsolicited — counted inside the gate.
+        }
+        by_author.entry(event.pubkey).or_default().push(event);
+    }
+
+    let mut out: Vec<ValidatedFollowList> = Vec::with_capacity(by_author.len());
+
+    for (_author, group) in by_author {
+        // Resolve the replaceable winner (future-clamp + newest-wins + lowest-id
+        // tie-break). `None` means every candidate was future-dated junk.
+        let Some(winner) = replaceable::pick_winner(group.iter(), now, future_clamp_secs) else {
+            continue;
+        };
+
+        // Extract the bounded, deduped, self-dropped followee set. `None` means
+        // the list exceeded `follow_cap` (rejected + counted) — drop the author.
+        let Some(followees) = follow_list::followee_pubkeys(winner, follow_cap) else {
+            continue;
+        };
+
+        out.push(ValidatedFollowList::from_event(winner, followees));
+    }
+
+    out
 }
