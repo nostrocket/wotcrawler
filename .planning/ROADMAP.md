@@ -58,7 +58,16 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. For each pubkey only the newest valid kind-3 (and kind:10002) is applied — future-dated created_at beyond the configurable clamp is rejected and same-timestamp ties break to the lowest event id.
   5. Malformed p-tags are skipped and oversized follow lists are bounded by a configurable cap without crashing the pipeline; per-relay rate limiting keeps request rates polite and rate-limit notices trigger backoff.
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+**Wave 1**
+
+  - [ ] 02-01-PLAN.md — Deps + module/error/ValidatedFollowList skeleton + event fixtures + RELAY-01/RELAY-02 API spikes
+
+**Wave 2** *(blocked on Wave 1 completion; 02-02 and 02-03 run in parallel — disjoint files)*
+
+  - [ ] 02-02-PLAN.md — Ingest validation: verify gate, dedup, replaceable resolution, p-tag bounds (INGEST-01..05)
+  - [ ] 02-03-PLAN.md — Relay acquisition: reconnect+backoff, NIP-11 cache, governor rate limit, until-window pagination (RELAY-01..04)
 
 ### Phase 3: Graph Writer & BFS Frontier
 
@@ -101,8 +110,6 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Each relay carries a health score derived from observed behavior (connect failures, timeouts, rate-limit hits, response latency).
   3. The health score visibly drives routing decisions and per-relay concurrency, so a degraded relay receives less traffic than a healthy one.
 
-**Plans**: TBD
-
 ## Progress
 
 **Execution Order:**
@@ -111,7 +118,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Schema & Data Contract | 3/3 | Complete   | 2026-06-12 |
-| 2. Relay Acquisition & Validation | 0/TBD | Not started | - |
+| 2. Relay Acquisition & Validation | 0/3 | Not started | - |
 | 3. Graph Writer & BFS Frontier | 0/TBD | Not started | - |
 | 4. Daemon, Staleness Loop & Observability | 0/TBD | Not started | - |
 | 5. NIP-65 Outbox Routing & Relay Health | 0/TBD | Not started | - |
