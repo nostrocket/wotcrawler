@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT change_count FROM pubkeys WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "change_count",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "pubkeys",
+            "name": "change_count"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "29ad9af68b4958ac7bc47029abaef40a2c937554aba6a6472471138dff1a7b33"
+}

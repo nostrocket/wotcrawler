@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE pubkeys SET status = 'fetched', last_fetched_at = now(), last_confirmed_at = now(), fetch_count = fetch_count + 1 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "58a9085ef5df77ee9398fa3006d57e5b21af66ece7c20be12311be2ce86a2bfe"
+}

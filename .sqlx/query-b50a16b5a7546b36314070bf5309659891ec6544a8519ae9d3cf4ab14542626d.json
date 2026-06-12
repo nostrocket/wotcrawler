@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT followee_id FROM follows WHERE follower_id = $1 ORDER BY followee_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "followee_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "follows",
+            "name": "followee_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b50a16b5a7546b36314070bf5309659891ec6544a8519ae9d3cf4ab14542626d"
+}

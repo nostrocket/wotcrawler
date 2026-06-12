@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) FROM pubkeys WHERE pubkey = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "3d49c80d6739648e8611426be5ace70881fc8a75890539be06c00e0ad0ddc4d0"
+}

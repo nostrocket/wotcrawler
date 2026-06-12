@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO pubkeys (pubkey) VALUES ($1) ON CONFLICT (pubkey) DO UPDATE SET pubkey = EXCLUDED.pubkey RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "pubkeys",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "12e9544621c25f70476fc02383c3b693d0a9b77dc262d91ab06cb69260452496"
+}

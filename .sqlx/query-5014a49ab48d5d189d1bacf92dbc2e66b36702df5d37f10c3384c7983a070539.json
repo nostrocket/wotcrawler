@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE pubkeys SET status = $2, last_fetched_at = $3 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5014a49ab48d5d189d1bacf92dbc2e66b36702df5d37f10c3384c7983a070539"
+}

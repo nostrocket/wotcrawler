@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT applied_event_id FROM pubkeys WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "applied_event_id",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "pubkeys",
+            "name": "applied_event_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "7b84159e013f5422e0a52f6402e0440e205a18d06217f09bcec52fafcbd5d47f"
+}
