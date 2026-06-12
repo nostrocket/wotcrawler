@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-02-PLAN.md
-last_updated: "2026-06-12T13:22:00.000Z"
-last_activity: 2026-06-12 -- Completed 02-02 (ingest validation gate — INGEST-01..05)
+stopped_at: Completed 02-03-PLAN.md
+last_updated: "2026-06-12T13:45:00.000Z"
+last_activity: 2026-06-12 -- Completed 02-03 (relay acquisition transport — RELAY-01..04)
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 8
-  completed_plans: 5
-  percent: 31
+  completed_plans: 6
+  percent: 38
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 ## Current Position
 
 Phase: 02 (relay-acquisition-validation) — EXECUTING
-Plan: 3 of 4
-Status: Executing Phase 02 (02-01 + 02-02 complete; 02-03 relay transport next, then 02-04 acquire pipeline)
-Last activity: 2026-06-12 -- Completed 02-02 (ingest validation gate — INGEST-01..05)
+Plan: 4 of 4
+Status: Executing Phase 02 (02-01 + 02-02 + 02-03 complete; 02-04 acquire pipeline next — wires fetch→ingest)
+Last activity: 2026-06-12 -- Completed 02-03 (relay acquisition transport — RELAY-01..04)
 
-Progress: [███░░░░░░░] 31%
+Progress: [████░░░░░░] 38%
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Progress: [███░░░░░░░] 31%
 | Phase 01 P03 | 9 | 3 tasks | 10 files |
 | Phase 02 P01 | 18 | 4 tasks | 14 files |
 | Phase 02 P02 | 6 | 3 tasks | 9 files |
+| Phase 02 P03 | 20 | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -75,6 +76,7 @@ Recent decisions affecting current work:
 - [Phase 2]: [02-01 SPIKE RELAY-01] nostr-relay-pool 0.44.1 reconnect is LINEAR (1 + diff/2) with ±3s jitter + 60s cap, NOT exponential — plan 02-03 MUST add an app-side capped-exponential-with-jitter backoff for fetch re-arm; SDK socket reconnect kept on. RELAY-01 not satisfied on SDK default alone.
 - [Phase 2]: [02-01 SPIKE RELAY-02] No SDK NIP-11 accessor (RelayInformationDocument is parse-only; reqwest dev-dep only) — plan 02-03 MUST add reqwest + GET Accept: application/nostr+json; defaults max_limit=500 / max_subscriptions=20 / max_filters=10 when omitted.
 - [Phase 2]: [02-02] Ingest validation gate shipped (INGEST-01..05): verify::accept (Event::verify id+sig + kind/author gate), cross-relay HashSet<EventId> dedup orchestrator, kind-agnostic pick_winner (future-clamp + newest-wins + lowest-id tie-break, EventId derives Ord), reject-not-truncate followee extraction. 16 offline tests green. ingest_events gained a requested-author-set parameter the 02-01 stub omitted.
+- [Phase 2]: [02-03] Relay acquisition transport shipped (RELAY-01..04): connect_curated (signer-less Client, custom RelayOptions via pool().add_relay), app-side capped-exponential-with-jitter backoff_delay (SDK reconnect is linear, so this satisfies RELAY-01), per-relay governor GCRA gate + rate-limited/blocked notice handling (RELAY-04), reqwest NIP-11 fetch + LimitCache with 500/20/10 defaults clamping non-positive values (RELAY-02), author-chunked until-window pagination where page_back compares count-vs-cap and never trusts EOSE + explicit per-fetch timeout (RELAY-03). 17 offline tests green. Mock relay = injected-fetch-fn (documented alternative to a ws mock). Fixed a u64→u32 truncation bug in the backoff saturation path.
 
 ### Pending Todos
 
@@ -95,6 +97,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-12T13:22:00.000Z
-Stopped at: Completed 02-02-PLAN.md
-Resume file: .planning/phases/02-relay-acquisition-validation/02-03-PLAN.md (relay transport — NIP-11 + reqwest + app-side backoff per the 02-01 spikes)
+Last session: 2026-06-12T13:45:00.000Z
+Stopped at: Completed 02-03-PLAN.md
+Resume file: .planning/phases/02-relay-acquisition-validation/02-04-PLAN.md (acquire pipeline — wires fetch_complete → ingest_events; uses LimitCache max_limit + RateLimiterRegistry gate)

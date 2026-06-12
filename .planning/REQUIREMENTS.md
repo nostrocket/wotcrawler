@@ -17,10 +17,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Relay Acquisition
 
-- [ ] **RELAY-01**: Crawler maintains connections to a configurable curated relay set with automatic reconnect and exponential backoff with jitter
-- [ ] **RELAY-02**: Crawler reads each relay's NIP-11 document and respects advertised limits (max_subscriptions, max_limit, etc.)
-- [ ] **RELAY-03**: Fetches paginate (`until` windows, author chunking) and never treat EOSE as proof of completeness
-- [ ] **RELAY-04**: Per-relay rate limiting keeps request rates polite; rate-limited notices trigger backoff
+- [x] **RELAY-01**: Crawler maintains connections to a configurable curated relay set with automatic reconnect and exponential backoff with jitter
+- [x] **RELAY-02**: Crawler reads each relay's NIP-11 document and respects advertised limits (max_subscriptions, max_limit, etc.)
+- [x] **RELAY-03**: Fetches paginate (`until` windows, author chunking) and never treat EOSE as proof of completeness
+- [x] **RELAY-04**: Per-relay rate limiting keeps request rates polite; rate-limited notices trigger backoff
 - [ ] **RELAY-05**: When a pubkey's kind 3 isn't found on curated relays, the crawler falls back to that pubkey's NIP-65 write relays
 - [ ] **RELAY-06**: Each relay carries a health score derived from observed behavior (connect failures, timeouts, rate-limit hits, response latency) that drives routing and per-relay concurrency
 
@@ -94,10 +94,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INGEST-03 | Phase 2 | Complete |
 | INGEST-04 | Phase 2 | Complete |
 | INGEST-05 | Phase 2 | Complete |
-| RELAY-01 | Phase 2 | Pending |
-| RELAY-02 | Phase 2 | Pending |
-| RELAY-03 | Phase 2 | Pending |
-| RELAY-04 | Phase 2 | Pending |
+| RELAY-01 | Phase 2 | Complete |
+| RELAY-02 | Phase 2 | Complete |
+| RELAY-03 | Phase 2 | Complete |
+| RELAY-04 | Phase 2 | Complete |
 | RELAY-05 | Phase 5 | Pending |
 | RELAY-06 | Phase 5 | Pending |
 | GRAPH-01 | Phase 1 | Complete |
