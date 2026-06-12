@@ -3,7 +3,7 @@ phase: 2
 slug: relay-acquisition-validation
 status: planned
 nyquist_compliant: true
-wave_0_complete: false
+wave_0_complete: true
 created: 2026-06-12
 ---
 
@@ -50,10 +50,11 @@ created: 2026-06-12
 | 02-03-T2 | 02-03 | 2 | RELAY-02 | T-02-13 | NIP-11 limits parsed + capped into filter | unit/integration | `cargo test --test nip11_limits` | ❌ W0→02-01/02-03 | ⬜ pending |
 | 02-03-T1 | 02-03 | 2 | RELAY-04 | T-02-10 | Rate-limited notice triggers backoff | unit | `cargo test --test rate_limit_backoff` | ❌ W0→02-01/02-03 | ⬜ pending |
 | 02-03-T1 | 02-03 | 2 | RELAY-01 | T-02-09 | Reconnect policy applied (+ jitter if app-layer added) | unit | `cargo test --test reconnect_policy` | ❌ W0→02-01/02-03 | ⬜ pending |
+| 02-04-T1 | 02-04 | 3 | RELAY-03, INGEST-01..05 | T-02-14 | fetch→ingest pipeline emits ValidatedFollowList end-to-end (only validated lists emerge) | integration | `cargo test --test acquire_pipeline` | ❌ W0→02-01..03 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
-*Wave 0 (fixtures, deps, module skeleton, mock-relay harness) is delivered by plan 02-01 (event fixtures) and the first task of 02-03 (mock relay). Pure-logic ingest tests need no Postgres and no network.*
+*Wave 0 (fixtures, deps, module skeleton, mock-relay harness) is delivered by plan 02-01 (event fixtures) and the first task of 02-03 (mock relay). Pure-logic ingest tests need no Postgres and no network. The Wave 3 pipeline test (02-04) composes the Wave 2 halves and reuses their existing fixtures/mock-relay harness — it adds no new Wave 0 dependency.*
 
 ---
 
@@ -61,7 +62,7 @@ created: 2026-06-12
 
 - [x] Test fixtures: helpers to build signed `Event`s with known keys, plus a forged/invalid-sig event, plus same-ts variants for tie-break → **plan 02-01 Task 2**
 - [x] A mock or in-process relay (or recorded responses) returning capped result sets + EOSE for the pagination test (RELAY-03) → **plan 02-03 Task 3 (tests/mock_relay/mod.rs)**
-- [x] `tests/` files per the Per-Task Verification Map → **plans 02-02 and 02-03**
+- [x] `tests/` files per the Per-Task Verification Map → **plans 02-02, 02-03, and 02-04**
 - [x] First `cargo build` confirms nostr-sdk 0.44.1 compiles on toolchain 1.94 → **plan 02-01 Task 1**
 
 ---
@@ -83,4 +84,4 @@ created: 2026-06-12
 - [x] Feedback latency < 120s
 - [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** planner-approved 2026-06-12
+**Approval:** planner-approved 2026-06-12 (revised: wave_0_complete corrected to true; added 02-04 pipeline-wiring task)

@@ -24,6 +24,7 @@ The entire stack is locked by CLAUDE.md and confirmed current: **nostr-sdk 0.44.
 | Cross-relay duplicate suppression | nostr-sdk (`Events` set) + App | App (event-id seen-set for streamed path) | `fetch_events` dedupes; a streamed/multi-call path needs an app-side seen-set. |
 | Replaceable-event resolution (newest-wins, clamp, tie-break) | App (validation module) | — | Adversary-controlled `created_at`; bespoke policy the protocol leaves to the client. |
 | p-tag extraction + malformity/size bounds | App (validation module) | nostr-sdk (`Tags::public_keys()`) | nostr-sdk extracts valid p-tags; the app applies the configurable cap and skip-malformed rule. |
+| fetch→ingest pipeline wiring (raw events → ValidatedFollowList) | App (relay+ingest seam) | — | The acquisition and validation halves must be connected so validated lists actually *emerge* (phase goal); wired by plan 02-04. |
 | Persisting validated lists | Phase 1 store layer (`apply_follow_list`) | — | Out of Phase 2 scope; Phase 2 emits values, Phase 3 wires the writer. |
 
 ## Phase Requirements
@@ -131,7 +132,7 @@ All packages discovered from CLAUDE.md's locked stack (an authoritative project 
    │  on CLOSED/NOTICE "rate-limited" → backoff this relay (RELAY-04)                   │
    └───────────────────────────────────────┬────────────────────────────────────────────┘
                                             │ raw Events (one or many per author)
-                                            ▼
+                                            ▼  ── wired by plan 02-04 (acquire pipeline) ──
    ┌────────────────────────── VALIDATION / INGEST MODULE ──────────────────────────────┐
    │  for each raw event:                                                                │
    │   1. event.verify()         ── id + secp256k1 sig   (INGEST-01) fail→discard+count  │
@@ -158,11 +159,12 @@ src/
 ├── store/                  # Phase 1 — unchanged
 ├── relay/
 │   ├── mod.rs              # Client/pool wiring, RelayOptions, connect curated set (RELAY-01)
+│   │                       # + acquire_validated_lists pipeline seam (02-04, fetch→ingest)
 │   ├── nip11.rs            # fetch + cache RelayInformationDocument limits (RELAY-02)
 │   ├── rate_limit.rs       # per-relay governor; rate-limited-notice backoff (RELAY-04)
 │   └── fetch.rs            # author-chunked until-window pagination loop (RELAY-03)
 └── ingest/
-    ├── mod.rs              # the validation gate orchestrator
+    ├── mod.rs              # the validation gate orchestrator (ingest_events entry point)
     ├── verify.rs           # Event::verify + kind/author match (INGEST-01)
     ├── replaceable.rs      # clamp + newest-wins + lowest-id tie-break (INGEST-03, -05)
     └── follow_list.rs      # p-tag extraction, dedup, self-drop, cap (INGEST-04)
@@ -172,7 +174,8 @@ tests/
 ├── replaceable.rs          # future clamp, newest-wins, tie-break (INGEST-03)
 ├── follow_list_bounds.rs   # malformed p-tags skipped; oversized list capped (INGEST-04)
 ├── relay_list.rs           # kind:10002 newest-wins (INGEST-05)
-└── pagination.rs           # capped response triggers another page; EOSE not trusted (RELAY-03)
+├── pagination.rs           # capped response triggers another page; EOSE not trusted (RELAY-03)
+└── acquire_pipeline.rs     # fetch (mock relay) → ingest → ValidatedFollowList emerges (02-04)
 ```
 
 ### Pattern 1: Connect a curated relay set with explicit reconnect policy (RELAY-01)
@@ -235,6 +238,7 @@ tests/
 - **Hand-rolling secp256k1, websocket framing, or a token bucket.** All provided (nostr-sdk, governor).
 - **Trusting that a relay returns only requested kinds/authors.** Filter responses against your own request.
 - **Unbounded p-tag processing.** Cap follow-list size (INGEST-04).
+- **Building the two halves but never connecting them.** The phase goal requires validated lists to *emerge*; the fetch→ingest seam must be wired (plan 02-04), not left as two unconnected halves.
 
 ## Don't Hand-Roll
 
@@ -444,31 +448,31 @@ fn followee_pubkeys(event: &Event, follow_cap: usize) -> Vec<PublicKey> {
 | A6 | kind:10002 storage is NOT required in Phase 2 (validate now, store in Phase 5) | INGEST-05 / Open Q3 | Medium — if 10002 must persist now, Phase 2 needs an additive migration + store fn. |
 | A7 | `Client::fetch_events` `Events` dedupes by event id within a call | INGEST-02 | Low — even if not, the app seen-set + store short-circuit cover it. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Does nostr-sdk's reconnect provide exponential backoff WITH jitter (RELAY-01)?**
+> All five open questions were resolved during planning (2026-06-12). Q1 and Q2 are resolved by the first-task API-verification spike (plan 02-01 Task 3 → `02-SPIKES.md`); Q3, Q4, and Q5 are resolved by recorded plan decisions below. No open API questions remain before the transport/ingest code is written.
+
+1. **Does nostr-sdk's reconnect provide exponential backoff WITH jitter (RELAY-01)?** — **RESOLVED (via spike, plan 02-01 Task 3 → `02-SPIKES.md`).**
    - Known: reconnect=true, retry_interval=10s, adjust_retry_interval=true (adjusts on success/attempts).
    - Unclear: whether "adjust" means exponential + jitter, or just success-based tuning.
-   - Recommendation: Plan a task to verify the actual algorithm (read `nostr-relay-pool` source / changelog). If it lacks jitter, layer an app-side capped-exponential+jitter backoff. Do not mark RELAY-01 satisfied on the default alone.
+   - **Resolution:** Disposition deferred to the `02-SPIKES.md` finding — plan 02-01 Task 3 reads the `nostr-relay-pool` 0.44 reconnect implementation/changelog and records the exact algorithm plus an explicit DECISION. If the SDK does not provide exponential+jitter, plan 02-03 Task 1 layers the app-side capped-exponential-with-jitter backoff the spike specifies; RELAY-01 is NOT marked satisfied on the SDK default alone. The spike's recorded disposition is authoritative.
 
-2. **What is the exact nostr-sdk 0.44 accessor for a relay's NIP-11 document (RELAY-02)?**
+2. **What is the exact nostr-sdk 0.44 accessor for a relay's NIP-11 document (RELAY-02)?** — **RESOLVED (via spike, plan 02-01 Task 3 → `02-SPIKES.md`).**
    - Known: `RelayInformationDocument` type exists with NIP-11 `limitation` fields (max_limit, max_subscriptions, max_filters per the spec).
    - Unclear: whether it's `relay.document().await`, a `Client` method, or requires a manual HTTP fetch.
-   - Recommendation: Plan a spike task to locate the accessor; fallback is a tiny `reqwest` GET with `Accept: application/nostr+json`. Cache per relay; provide sane defaults when a relay omits limits.
+   - **Resolution:** Disposition deferred to the `02-SPIKES.md` finding — plan 02-01 Task 3 locates the exact accessor (or records the `reqwest` GET with `Accept: application/nostr+json` fallback) and the per-field defaults. Plan 02-03 Task 2 implements against that recorded decision; `reqwest` is added to Cargo.toml only if the spike chose the fallback. The spike's recorded disposition is authoritative.
 
-3. **Must kind:10002 (NIP-65) data be PERSISTED in Phase 2, or only validated (INGEST-05)?**
+3. **Must kind:10002 (NIP-65) data be PERSISTED in Phase 2, or only validated (INGEST-05)?** — **RESOLVED (plan decision): validate-only in Phase 2; persist in Phase 5.**
    - Known: INGEST-05 says "ingested and validated under the same replaceable-event rules." RELAY-05/06 (NIP-65 fallback consuming 10002) are Phase 5. Phase 1 explicitly deferred kind:10002 storage tables to a later additive migration (D-13).
-   - Unclear: whether "ingested" implies storage now or just validation now.
-   - Recommendation: Phase 2 validates 10002 with the same gate/resolver and emits a validated value; defer the storage table + write fn to Phase 5 (where it's consumed) unless the planner/operator wants it persisted now. If persisted now, add an additive migration. Flag for discuss-phase.
+   - **Resolution:** Phase 2 validates kind:10002 with the identical gate + resolver and emits a validated value (per plan 02-02 Task 2 + `tests/relay_list.rs`); it does NOT persist 10002. The storage table + write fn are deferred to Phase 5 where the data is consumed (consistent with Phase 1 D-13). No additive migration in Phase 2.
 
-4. **Oversized follow list: reject vs. truncate (INGEST-04)?**
+4. **Oversized follow list: reject vs. truncate (INGEST-04)?** — **RESOLVED (plan decision): default REJECT + count, config-driven.**
    - Known: must be bounded by a configurable cap "without crashing."
-   - Unclear: whether to drop the whole list or truncate to the cap.
-   - Recommendation: Reject-and-count is safer (a 50k-tag event is almost certainly a follow-bomb, not a real list); truncation silently corrupts the graph. Default to reject + metric; make it config-driven. Confirm with operator.
+   - **Resolution:** Default to REJECT-and-count (increment `ingest_oversized_follow_list`) when an extracted list exceeds the configurable `follow_cap`, because a 50k-tag event is almost certainly a follow-bomb and truncation silently corrupts the graph. Reject-vs-truncate is config-driven but defaults to reject (implemented in plan 02-02 Task 3 + `tests/follow_list_bounds.rs::cap`).
 
-5. **`fetch_events` (buffer-per-window) vs. `stream_events` (incremental)?**
+5. **`fetch_events` (buffer-per-window) vs. `stream_events` (incremental)?** — **RESOLVED (plan decision): use `fetch_events` per author-chunk window.**
    - Known: both exist; `fetch_events` buffers a window, `stream_events` yields incrementally.
-   - Recommendation: `fetch_events` per author-chunk window is simplest and memory is bounded by chunk size × max_limit; default to it. Switch to `stream_events` only if window memory becomes a measured problem.
+   - **Resolution:** Default to `fetch_events` per author-chunk window — memory is bounded by `chunk size × max_limit` and the code is simpler (implemented in plan 02-03 Task 3). Switch to `stream_events` only if window memory becomes a measured problem in a later phase.
 
 ## Environment Availability
 
@@ -509,6 +513,7 @@ fn followee_pubkeys(event: &Event, follow_cap: usize) -> Vec<PublicKey> {
 | RELAY-02 | NIP-11 limits parsed + capped into filter | unit/integration | `cargo test nip11_limits` | ❌ Wave 0 |
 | RELAY-04 | rate-limited notice triggers backoff | unit | `cargo test rate_limit_backoff` | ❌ Wave 0 |
 | RELAY-01 | Reconnect policy applied (+ jitter if app-layer added) | unit | `cargo test reconnect_policy` | ❌ Wave 0 |
+| RELAY-03 + INGEST-* | fetch→ingest pipeline emits ValidatedFollowList | integration | `cargo test acquire_pipeline` (mock relay) | ❌ Wave 0 |
 
 ### Sampling Rate
 - **Per task commit:** `cargo test --lib` (validation logic — fast, offline).
@@ -572,7 +577,7 @@ fn followee_pubkeys(event: &Event, follow_cap: usize) -> Vec<PublicKey> {
 - Standard stack: HIGH — versions verified live; nostr-sdk is the locked, canonical crate; event/filter/tags API signatures quoted from docs.rs.
 - Architecture: HIGH — responsibilities clearly split between nostr-sdk (transport/crypto/parse/dedup), governor (rate limit), and three custom policies (pagination, replaceable resolution, bounds).
 - Pitfalls: HIGH — drawn from prior project pitfall research mapped to verified NIP semantics; this is the project's known-risk domain.
-- Two MEDIUM-risk gaps tracked as Open Questions: reconnect jitter (RELAY-01) and the NIP-11 accessor (RELAY-02). Neither blocks planning; both are first-task spikes.
+- Two MEDIUM-risk gaps were tracked as Open Questions: reconnect jitter (RELAY-01) and the NIP-11 accessor (RELAY-02). Neither blocks planning; both are first-task spikes (plan 02-01 Task 3) and are now marked RESOLVED above.
 
 **Research date:** 2026-06-12
 **Valid until:** 2026-07-12 (stable stack; re-verify if nostr-sdk 0.45 goes stable before planning completes).

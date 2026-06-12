@@ -58,7 +58,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. For each pubkey only the newest valid kind-3 (and kind:10002) is applied — future-dated created_at beyond the configurable clamp is rejected and same-timestamp ties break to the lowest event id.
   5. Malformed p-tags are skipped and oversized follow lists are bounded by a configurable cap without crashing the pipeline; per-relay rate limiting keeps request rates polite and rate-limit notices trigger backoff.
 
-**Plans**: 3 plans
+**Plans**: 4 plans
 
 **Wave 1**
 
@@ -68,6 +68,10 @@ Decimal phases appear between their surrounding integers in numeric order.
 
   - [ ] 02-02-PLAN.md — Ingest validation: verify gate, dedup, replaceable resolution, p-tag bounds (INGEST-01..05)
   - [ ] 02-03-PLAN.md — Relay acquisition: reconnect+backoff, NIP-11 cache, governor rate limit, until-window pagination (RELAY-01..04)
+
+**Wave 3** *(blocked on Wave 2; wires the two halves together)*
+
+  - [ ] 02-04-PLAN.md — Relay→ingest pipeline seam: fetch output through the ingest gate so ValidatedFollowList emerges end-to-end, proven by acquire_pipeline E2E test (RELAY-03 + INGEST-01..05)
 
 ### Phase 3: Graph Writer & BFS Frontier
 
