@@ -14,6 +14,14 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 nostr-sdk = "0.44"
 governor = "0.10"
 metrics = "0.24"
+# NIP-11 has no SDK accessor (02-SPIKES RELAY-02): fetch the document over HTTP
+# with `Accept: application/nostr+json`. rustls TLS matches the project's
+# tls-rustls posture (sqlx already uses rustls); openssl default is disabled.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# App-side capped-exponential-with-jitter backoff (02-SPIKES RELAY-01): the SDK
+# reconnect is linear, so the fetch re-arm / rate-limited-notice backoff needs
+# its own jittered schedule. rand 0.9 matches governor's transitive rand.
+rand = "0.9"
 
 [dev-dependencies]
 testcontainers = "0.27.3"
