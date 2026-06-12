@@ -26,7 +26,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Graph Storage
 
-- [ ] **GRAPH-01**: PostgreSQL schema stores pubkeys (surrogate bigint ids), directed follow edges, and per-pubkey freshness metadata, with versioned migrations
+- [x] **GRAPH-01**: PostgreSQL schema stores pubkeys (surrogate bigint ids), directed follow edges, and per-pubkey freshness metadata, with versioned migrations
 - [ ] **GRAPH-02**: A replacing kind-3 is applied as a transactional edge diff (insert added, delete removed); an unchanged list (same event id) touches zero edge rows
 - [ ] **GRAPH-03**: A separate process (the spam layer) can read the graph concurrently while the crawler writes, without coordination
 - [ ] **GRAPH-04**: The schema is documented as the public contract for downstream consumers
@@ -100,7 +100,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | RELAY-04 | Phase 2 | Pending |
 | RELAY-05 | Phase 5 | Pending |
 | RELAY-06 | Phase 5 | Pending |
-| GRAPH-01 | Phase 1 | Pending |
+| GRAPH-01 | Phase 1 | Complete |
 | GRAPH-02 | Phase 3 | Pending |
 | GRAPH-03 | Phase 1 | Pending |
 | GRAPH-04 | Phase 1 | Pending |
@@ -120,6 +120,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | OPS-02 | Phase 4 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 29 total
 - Mapped to phases: 29
 - Unmapped: 0 ✓

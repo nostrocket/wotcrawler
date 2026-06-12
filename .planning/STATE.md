@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 1 context gathered
-last_updated: "2026-06-11T15:35:58.662Z"
-last_activity: 2026-06-11 — Roadmap created (5 phases, 29/29 requirements mapped)
+last_updated: "2026-06-12T06:51:35.647Z"
+last_activity: 2026-06-12 -- Phase 01 execution started
 progress:
   total_phases: 5
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 3
+  completed_plans: 1
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-11)
 
 **Core value:** From one anchor pubkey, maintain a complete and continuously fresh follow graph of everyone reachable through follows — fetched efficiently — so a downstream trust/spam layer can read it from a shared database at any time.
-**Current focus:** Phase 1 — Schema & Data Contract
+**Current focus:** Phase 01 — schema-data-contract
 
 ## Current Position
 
-Phase: 1 of 5 (Schema & Data Contract)
-Plan: 0 of TBD in current phase
+Phase: 01 (schema-data-contract) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-06-11 — Roadmap created (5 phases, 29/29 requirements mapped)
+Last activity: 2026-06-12 -- Phase 01 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -52,6 +52,7 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: —
 
 *Updated after each plan completion*
+| Phase 01 P01 | 120 | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -63,6 +64,7 @@ Recent decisions affecting current work:
 - [Roadmap]: Schema-first ordering — the PostgreSQL schema is the spam layer's public API and gates all later work; migrations on hundreds of millions of rows are expensive to change later.
 - [Roadmap]: RELAY-05 (NIP-65 fallback) and RELAY-06 (relay health) kept in v1 per user override (research suggested deferring); both land in Phase 5, gated behind Phase 4 coverage metrics.
 - [Roadmap]: FRESH-04 (adaptive refresh) stays v2 — no public kind-3 churn data exists; needs weeks of FRESH-03 instrumentation first.
+- [Phase ?]: [01-01] Pinned Rust toolchain to 1.94.0 (sqlx 0.9 MSRV) per RESEARCH MSRV correction.
 
 ### Pending Todos
 
@@ -83,6 +85,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-11T15:15:47.267Z
+Last session: 2026-06-12T06:51:29.902Z
 Stopped at: Phase 1 context gathered
 Resume file: .planning/phases/01-schema-data-contract/01-CONTEXT.md

@@ -35,7 +35,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 1**
 
-  - [ ] 01-01-PLAN.md — Toolchain + project scaffold + testcontainers Postgres fixture
+  - [x] 01-01-PLAN.md — Toolchain + project scaffold + testcontainers Postgres fixture
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -110,7 +110,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Schema & Data Contract | 0/3 | Not started | - |
+| 1. Schema & Data Contract | 1/3 | In Progress|  |
 | 2. Relay Acquisition & Validation | 0/TBD | Not started | - |
 | 3. Graph Writer & BFS Frontier | 0/TBD | Not started | - |
 | 4. Daemon, Staleness Loop & Observability | 0/TBD | Not started | - |
