@@ -17,11 +17,14 @@ pub mod fetch;
 pub mod nip11;
 pub mod rate_limit;
 
+use std::collections::HashSet;
+use std::future::Future;
 use std::time::Duration;
 
-use nostr_sdk::{Client, RelayOptions};
+use nostr_sdk::{Client, Event, Kind, PublicKey, RelayOptions, Timestamp};
 
 use crate::error::RelayError;
+use crate::ingest::{self, ValidatedFollowList};
 
 /// Default base retry interval handed to nostr-sdk's socket reconnect.
 ///
@@ -107,4 +110,94 @@ pub async fn connect_curated(
     }
     client.connect().await;
     Ok(client)
+}
+
+/// The fetch -> ingest seam: turn a raw relay event stream into validated
+/// follow lists (the Phase 2 goal made observable end-to-end).
+///
+/// This is the connection plans 02-02 (ingest gate) and 02-03 (relay transport)
+/// build *toward* but deliberately leave unwired — the RESEARCH anti-pattern
+/// "building the two halves but never connecting them". This function owns NO
+/// validation logic of its own: it runs the raw, still-unverified events
+/// produced by the pagination loop ([`fetch`], RELAY-03) through the ingest
+/// orchestrator ([`ingest::ingest_events`], INGEST-01..05) so that — and only
+/// then — a [`ValidatedFollowList`] emerges. verify / dedup / replaceable
+/// resolve / follow-list bounds all live in [`crate::ingest`]; the seam merely
+/// composes fetch -> ingest.
+///
+/// `fetch` is the raw-event source. In production this is a closure over
+/// [`fetch::fetch_complete`] driving the connected [`Client`]
+/// (see [`acquire_validated_lists_client`]); in tests it is the in-process
+/// scripted mock relay (`tests/mock_relay`). Either way the seam consumes the
+/// FULL paged output — count-vs-cap page-back (RELAY-03) is handled inside
+/// `fetch` *before* this seam sees the stream — and hands the entire union to a
+/// single resolution pass, so a relay cannot split a pubkey's events across
+/// window boundaries to defeat newest-wins (T-02-15).
+///
+/// `requested` is the set of authors actually solicited; the ingest gate drops
+/// events from any other author as unsolicited (INGEST-01 / Pitfall 4 —
+/// T-02-14). `want_kind`, `now`, `future_clamp_secs`, and `follow_cap` are
+/// passed straight through to [`ingest::ingest_events`].
+///
+/// A fetch failure surfaces as [`RelayError`] (never swallowed); the ingest
+/// gate's routine adversarial-input rejections are count-and-skip inside the
+/// orchestrator and so do not produce an error here.
+pub async fn acquire_validated_lists<F, Fut>(
+    requested: &HashSet<PublicKey>,
+    want_kind: Kind,
+    now: Timestamp,
+    future_clamp_secs: u64,
+    follow_cap: usize,
+    fetch: F,
+) -> Result<Vec<ValidatedFollowList>, RelayError>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<Vec<Event>, RelayError>>,
+{
+    // 1. Acquire the raw, deduplicated, still-UNVERIFIED event stream. All
+    //    RELAY-03 paging happens inside `fetch`; the seam never re-implements it.
+    let raw_events: Vec<Event> = fetch().await?;
+
+    // 2. Route EVERY raw event through the ingest gate — there is no direct path
+    //    from fetch to ValidatedFollowList (T-02-14). The orchestrator verifies
+    //    id+sig, drops unsolicited authors/kinds, dedups by id, resolves the
+    //    replaceable winner over the full union, and bounds the follow list.
+    Ok(ingest::ingest_events(
+        raw_events,
+        want_kind,
+        requested,
+        now,
+        future_clamp_secs,
+        follow_cap,
+    ))
+}
+
+/// [`acquire_validated_lists`] driven by a live, connected [`Client`].
+///
+/// The production entry point: it closes over [`fetch::fetch_complete`] (the
+/// author-chunked until-window pagination loop, RELAY-03) so the curated pool
+/// supplies the raw stream, then composes it through the ingest gate. The
+/// requested-author set handed to the ingest gate is exactly `authors` — the
+/// set the fetch actually solicited.
+#[allow(clippy::too_many_arguments)]
+pub async fn acquire_validated_lists_client(
+    client: &Client,
+    authors: &[PublicKey],
+    want_kind: Kind,
+    max_limit: usize,
+    max_authors: usize,
+    now: Timestamp,
+    future_clamp_secs: u64,
+    follow_cap: usize,
+) -> Result<Vec<ValidatedFollowList>, RelayError> {
+    let requested: HashSet<PublicKey> = authors.iter().copied().collect();
+    acquire_validated_lists(
+        &requested,
+        want_kind,
+        now,
+        future_clamp_secs,
+        follow_cap,
+        || fetch::fetch_complete(client, authors, want_kind, max_limit, max_authors),
+    )
+    .await
 }
