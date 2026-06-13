@@ -106,7 +106,19 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. In-flight fetch concurrency is bounded end-to-end, so the frontier and queues do not grow without limit under load.
   5. Every pubkey records when its follow-list knowledge was last acquired or confirmed.
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+**Wave 1**
+
+  - [ ] 03-01-PLAN.md — Additive frontier migration (in_progress status + claimed_at + fetch_attempts, pubkey_freshness collapse) + migration idempotency test + Wave 0 test scaffolds (graph_writer.rs, frontier.rs) (GRAPH-02, CRAWL-03, FRESH-01)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+  - [ ] 03-02-PLAN.md — Frontier queue module: seed_anchor, claim_batch (FOR UPDATE SKIP LOCKED short-txn lease), reclaim_stale_on_startup, requeue_or_fail; crawl module + lib.rs registration; claim/lease/reclaim/terminal-stamp tests (CRAWL-01, CRAWL-02, CRAWL-03, FRESH-01)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+  - [ ] 03-03-PLAN.md — apply_validated seam + fan-out/union/single-ingest + bounded worker-pool crawl loop; GRAPH-02 edge-diff verification through the seam + CRAWL-01/02/03/04 + FRESH-01 full verification over the offline mock relay (GRAPH-02, CRAWL-01, CRAWL-02, CRAWL-04, FRESH-01)
 
 ### Phase 4: Daemon, Staleness Loop & Observability
 
@@ -120,8 +132,6 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. A Prometheus /metrics endpoint exposes crawl coverage, staleness distribution, relay health, frontier depth, fetch rate, and validation-failure counts, and a committed Grafana dashboard JSON renders them.
   4. An HTTP liveness/readiness endpoint reports daemon health to a supervisor, structured tracing logs at configurable levels, and periodic progress summaries (frontier size, fetch rate, coverage %) appear during a long crawl.
   5. Sending a shutdown signal drains in-flight work and leaves the database in a consistent state with no orphaned leases.
-
-**Plans**: TBD
 
 ### Phase 5: NIP-65 Outbox Routing & Relay Health
 
@@ -143,6 +153,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. Schema & Data Contract | 3/3 | Complete   | 2026-06-12 |
 | 2. Relay Acquisition & Validation | 12/12 | Complete    | 2026-06-13 |
-| 3. Graph Writer & BFS Frontier | 0/TBD | Not started | - |
+| 3. Graph Writer & BFS Frontier | 0/3 | Planned | - |
 | 4. Daemon, Staleness Loop & Observability | 0/TBD | Not started | - |
 | 5. NIP-65 Outbox Routing & Relay Health | 0/TBD | Not started | - |
