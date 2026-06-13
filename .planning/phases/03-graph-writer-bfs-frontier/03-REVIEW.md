@@ -17,7 +17,11 @@ findings:
   warning: 3
   info: 2
   total: 6
-status: issues_found
+status: resolved
+resolution:
+  fixed: [CR-01, WR-01, WR-02, WR-03]
+  skipped: [IN-01, IN-02]
+  skipped_reason: "Info-tier, out of fix scope (CR/WR only); IN-02 is non-actionable per the review (subsumed by the CR-01 fix)."
 ---
 
 # Phase 03: Code Review Report
