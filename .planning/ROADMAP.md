@@ -86,7 +86,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Gap-Closure Wave 3** *(from 02-VERIFICATION.md re-verification; 02-10 then 02-11 — both edit src/relay/fetch.rs so they run sequentially, not in parallel)*
 
-  - [ ] 02-10-PLAN.md — fetch.rs paginate_chunk prev_until stall detection: a deterministic relay re-serving the same cap-sized prefix for a pinned until=T with more events at the boundary second surfaces an Err (requeue) instead of silent truncation (CR-03 residual) [RELAY-03]
+  - [x] 02-10-PLAN.md — fetch.rs paginate_chunk prev_until stall detection: a deterministic relay re-serving the same cap-sized prefix for a pinned until=T with more events at the boundary second surfaces an Err (requeue) instead of silent truncation (CR-03 residual) [RELAY-03]
   - [ ] 02-11-PLAN.md — fetch.rs thread the per-relay relay_url through fetch_complete/fetch_complete_with_timeout as the GCRA limiter key (pool_label demoted to diagnostics); two pooled relays get two independent limiter keys (WR-03 residual) [RELAY-04]
 
 ### Phase 3: Graph Writer & BFS Frontier
@@ -138,7 +138,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Schema & Data Contract | 3/3 | Complete   | 2026-06-12 |
-| 2. Relay Acquisition & Validation | 9/9 | Complete   | 2026-06-13 |
+| 2. Relay Acquisition & Validation | 10/11 | In Progress|  |
 | 3. Graph Writer & BFS Frontier | 0/TBD | Not started | - |
 | 4. Daemon, Staleness Loop & Observability | 0/TBD | Not started | - |
 | 5. NIP-65 Outbox Routing & Relay Health | 0/TBD | Not started | - |
