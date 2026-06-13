@@ -256,8 +256,16 @@ where
 /// hostile relay's forged id-squat copy could suppress the genuine event before
 /// its signature is ever checked. Within a chunk, [`paginate_chunk`] dedups by
 /// id only to drive page progress, never across the verification boundary.
+///
+/// `relay_url` is the caller's INDIVIDUAL relay url (threaded from
+/// [`super::acquire_validated_lists_client`]). It is the per-relay GCRA limiter
+/// key AND the [`RelayError::FetchTimeout`] label, so each relay drives its own
+/// quota (WR-03 residual / RELAY-04 / threats T-02-10, T-02-17). It is NOT a
+/// joined pool string — [`pool_label`] is diagnostics-only.
+#[allow(clippy::too_many_arguments)]
 pub async fn fetch_complete(
     client: &Client,
+    relay_url: &str,
     authors: &[PublicKey],
     kind: Kind,
     max_limit: usize,
@@ -266,6 +274,7 @@ pub async fn fetch_complete(
 ) -> Result<Vec<Event>, RelayError> {
     fetch_complete_with_timeout(
         client,
+        relay_url,
         authors,
         kind,
         max_limit,
@@ -278,6 +287,15 @@ pub async fn fetch_complete(
 
 /// [`fetch_complete`] with an explicit per-fetch timeout (Pitfall 9).
 ///
+/// `relay_url` is the caller's INDIVIDUAL relay url, used as BOTH the per-relay
+/// GCRA limiter key (via [`paginate_chunk_gated`]) AND the
+/// [`RelayError::FetchTimeout`] label. Keying on the individual url — not a
+/// joined pool string — means each relay has its own quota and a relay
+/// drop/reconnect preserves accrued GCRA state instead of minting a fresh
+/// full-burst limiter (WR-03 residual / RELAY-04 / threats T-02-10, T-02-17).
+/// `pool_label` is computed only for human-readable diagnostics in the
+/// FetchTimeout message; it is NEVER passed to `registry.acquire()`.
+///
 /// `registry` gates every window REQ behind the per-relay GCRA limiter
 /// ([`paginate_chunk_gated`], WR-03 / RELAY-04): the politeness quota actually
 /// runs in production, not only in the limiter's unit tests. `max_limit` is the
@@ -287,6 +305,7 @@ pub async fn fetch_complete(
 #[allow(clippy::too_many_arguments)]
 pub async fn fetch_complete_with_timeout(
     client: &Client,
+    relay_url: &str,
     authors: &[PublicKey],
     kind: Kind,
     max_limit: usize,
@@ -296,21 +315,28 @@ pub async fn fetch_complete_with_timeout(
 ) -> Result<Vec<Event>, RelayError> {
     let cap = max_limit.max(1);
     let chunk_size = max_authors.max(1);
-    // Label for FetchTimeout AND the per-relay rate-limiter key: the connected
-    // pool's relay urls. A timeout is a pool-level requeue signal (the SDK fans
-    // the fetch across the pool); listing the connected relays gives the operator
-    // the actionable context without embedding secrets (T-02-01).
-    let relay_url = pool_label(client).await;
+    // Diagnostics ONLY (T-02-01): the joined connected-pool urls give the
+    // operator pool-level context, folded into the FetchTimeout label below.
+    // They NEVER key the limiter or the requeue identity — that is the per-relay
+    // `relay_url` parameter. Keying the limiter on this joined string was the
+    // WR-03 residual bug (T-02-10/T-02-17): it collapsed every relay into one
+    // shared quota and reset GCRA state on pool churn.
+    let pool_diag = pool_label(client).await;
+    // The requeue label leads with the individual relay_url (the actionable
+    // key) and appends the pool context for the operator.
+    let timeout_label = format!("{relay_url} (pool: {pool_diag})");
     let mut all: Vec<Event> = Vec::new();
     for chunk in authors.chunks(chunk_size) {
-        // Gate every window REQ behind the per-relay limiter (WR-03 / T-02-10).
-        let events = paginate_chunk_gated(chunk, kind, cap, registry, relay_url.as_str(), |filter| {
-            let relay_url = relay_url.as_str();
+        // Gate every window REQ behind the per-relay limiter (WR-03 / T-02-10),
+        // keyed on the caller's individual relay_url.
+        let events = paginate_chunk_gated(chunk, kind, cap, registry, relay_url, |filter| {
+            let timeout_label = timeout_label.as_str();
             // Every fetch carries the deadline; a timed-out window is a requeue,
             // not completion (Pitfall 9). The SDK returns a partial Ok on
             // timeout, so fetch_window_with_deadline's elapsed check — not EOSE,
-            // not an SDK error — is what surfaces RelayError::FetchTimeout.
-            fetch_window_with_deadline(filter, timeout, relay_url, |filter| async move {
+            // not an SDK error — is what surfaces RelayError::FetchTimeout. The
+            // label leads with the per-relay url, enriched with pool context.
+            fetch_window_with_deadline(filter, timeout, timeout_label, |filter| async move {
                 let events = client
                     .fetch_events(filter, timeout)
                     .await
@@ -326,9 +352,10 @@ pub async fn fetch_complete_with_timeout(
     Ok(all)
 }
 
-/// A human-readable label for the connected pool, used only for
-/// [`RelayError::FetchTimeout`] context. Joins the pool's relay urls; never
-/// embeds secrets (T-02-01).
+/// A human-readable label for the connected pool, used only for diagnostics
+/// (tracing / operator context). Joins the pool's relay urls; never embeds
+/// secrets (T-02-01) and NEVER keys the per-relay limiter — that is the
+/// individual `relay_url` threaded from the caller.
 async fn pool_label(client: &Client) -> String {
     let relays = client.relays().await;
     if relays.is_empty() {

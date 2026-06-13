@@ -224,7 +224,7 @@ pub async fn acquire_validated_lists_client(
         now,
         future_clamp_secs,
         follow_cap,
-        || fetch::fetch_complete(client, authors, want_kind, max_limit, max_authors, registry),
+        || fetch::fetch_complete(client, relay_url, authors, want_kind, max_limit, max_authors, registry),
     )
     .await;
     // A fully-successful fetch clears the relay's backoff so its schedule starts
