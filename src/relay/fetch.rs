@@ -19,9 +19,9 @@
 //!
 //! Implemented in plan 02-03 Task 3.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::future::Future;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use nostr_sdk::{Client, Event, EventId, Filter, Kind, PublicKey, Timestamp};
 
@@ -138,18 +138,32 @@ where
     Ok(out)
 }
 
-/// Deduplicate events by id (a pubkey can appear across author chunks / windows,
-/// and the same event can arrive from multiple relays — Pitfall: cross-source
-/// duplicates). Keeps first occurrence.
-fn dedup_by_id(events: Vec<Event>) -> Vec<Event> {
-    let mut seen: HashMap<EventId, ()> = HashMap::with_capacity(events.len());
-    let mut out = Vec::with_capacity(events.len());
-    for ev in events {
-        if seen.insert(ev.id, ()).is_none() {
-            out.push(ev);
-        }
+/// Run one window fetch under a deadline, converting a partial-`Ok` timeout into
+/// an explicit [`RelayError::FetchTimeout`] requeue signal (CR-02 / Pitfall 9).
+///
+/// nostr-relay-pool 0.44.1 drops the activity sender when the per-fetch timeout
+/// fires and the event stream simply ends — `client.fetch_events` returns a
+/// partial `Ok`, NOT an error. Treating that partial window as "complete" would
+/// silently record a truncated follow list. This wrapper records the wall-clock
+/// start, awaits the injected `fetch`, and if the elapsed time meets or exceeds
+/// the deadline it returns `Err(FetchTimeout(relay_url))` so the caller requeues
+/// those authors. The elapsed check is the ONLY reliable timeout signal here.
+pub async fn fetch_window_with_deadline<F, Fut>(
+    filter: Filter,
+    timeout: Duration,
+    relay_url: &str,
+    fetch: F,
+) -> Result<Vec<Event>, RelayError>
+where
+    F: FnOnce(Filter) -> Fut,
+    Fut: Future<Output = Result<Vec<Event>, RelayError>>,
+{
+    let started = Instant::now();
+    let events = fetch(filter).await?;
+    if started.elapsed() >= timeout {
+        return Err(RelayError::FetchTimeout(relay_url.to_string()));
     }
-    out
+    Ok(events)
 }
 
 /// Fetch every stored event of `kind` for `authors` from the connected pool,
@@ -161,8 +175,13 @@ fn dedup_by_id(events: Vec<Event>) -> Vec<Event> {
 /// relay cap. Every `fetch_events` carries [`DEFAULT_FETCH_TIMEOUT`]; a timed-out
 /// window surfaces as [`RelayError::FetchTimeout`] so the caller requeues those
 /// authors (Pitfall 9) rather than recording them complete. Returns the raw,
-/// id-deduplicated, still-unverified events for the ingest gate
-/// ([`crate::ingest`], wired in plan 02-04) to validate.
+/// still-unverified events for the ingest gate ([`crate::ingest`]) to validate.
+///
+/// No pre-verify dedup is performed here (CR-01 fetch half): authoritative
+/// cross-source dedup must follow `verify::accept` in the ingest gate, or a
+/// hostile relay's forged id-squat copy could suppress the genuine event before
+/// its signature is ever checked. Within a chunk, [`paginate_chunk`] dedups by
+/// id only to drive page progress, never across the verification boundary.
 pub async fn fetch_complete(
     client: &Client,
     authors: &[PublicKey],
@@ -185,20 +204,46 @@ pub async fn fetch_complete_with_timeout(
 ) -> Result<Vec<Event>, RelayError> {
     let cap = max_limit.max(1);
     let chunk_size = max_authors.max(1);
+    // Label for FetchTimeout: the connected pool's relay urls. A timeout is a
+    // pool-level requeue signal (the SDK fans the fetch across the pool); listing
+    // the connected relays gives the operator the actionable context without
+    // embedding secrets (T-02-01).
+    let relay_url = pool_label(client).await;
     let mut all: Vec<Event> = Vec::new();
     for chunk in authors.chunks(chunk_size) {
-        let events = paginate_chunk(chunk, kind, cap, |filter| async move {
+        let events = paginate_chunk(chunk, kind, cap, |filter| {
+            let relay_url = relay_url.as_str();
             // Every fetch carries the deadline; a timed-out window is a requeue,
-            // not completion (Pitfall 9). fetch_events auto-closes on EOSE, but
-            // page_back — not EOSE — decides completeness.
-            let events = client
-                .fetch_events(filter, timeout)
-                .await
-                .map_err(RelayError::Client)?;
-            Ok::<_, RelayError>(events.into_iter().collect())
+            // not completion (Pitfall 9). The SDK returns a partial Ok on
+            // timeout, so fetch_window_with_deadline's elapsed check — not EOSE,
+            // not an SDK error — is what surfaces RelayError::FetchTimeout.
+            fetch_window_with_deadline(filter, timeout, relay_url, |filter| async move {
+                let events = client
+                    .fetch_events(filter, timeout)
+                    .await
+                    .map_err(RelayError::Client)?;
+                Ok::<_, RelayError>(events.into_iter().collect())
+            })
         })
         .await?;
         all.extend(events);
     }
-    Ok(dedup_by_id(all))
+    // No pre-verify dedup (CR-01): cross-source dedup happens AFTER verification
+    // in the ingest gate. Return the raw union.
+    Ok(all)
+}
+
+/// A human-readable label for the connected pool, used only for
+/// [`RelayError::FetchTimeout`] context. Joins the pool's relay urls; never
+/// embeds secrets (T-02-01).
+async fn pool_label(client: &Client) -> String {
+    let relays = client.relays().await;
+    if relays.is_empty() {
+        return "pool (no connected relays)".to_string();
+    }
+    relays
+        .keys()
+        .map(|url| url.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }

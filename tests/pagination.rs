@@ -49,11 +49,8 @@ async fn inclusive_boundary_keeps_boundary_event() {
     let window3 = vec![]; // genuine exhaustion
 
     let relay = ScriptedRelay::new(vec![window1, window2, window3]);
-    let mut fetch = relay.fetch_fn();
-    let events = paginate_chunk(&authors, Kind::ContactList, cap, |filter| {
-        let fut = fetch(filter);
-        async move { fut.await }
-    })
+    let fetch = relay.fetch_fn();
+    let events = paginate_chunk(&authors, Kind::ContactList, cap, fetch)
     .await
     .expect("pagination must succeed");
 
@@ -86,11 +83,8 @@ async fn cross_window_dedup_keeps_each_event_once() {
     let window3 = vec![]; // exhaustion
 
     let relay = ScriptedRelay::new(vec![window1, window2, window3]);
-    let mut fetch = relay.fetch_fn();
-    let events = paginate_chunk(&authors, Kind::ContactList, cap, |filter| {
-        let fut = fetch(filter);
-        async move { fut.await }
-    })
+    let fetch = relay.fetch_fn();
+    let events = paginate_chunk(&authors, Kind::ContactList, cap, fetch)
     .await
     .expect("pagination must succeed");
 
@@ -114,11 +108,8 @@ async fn zero_new_id_window_stops_even_when_capped() {
     let window2 = vec![a.clone(), b.clone()];
 
     let relay = ScriptedRelay::new(vec![window1, window2]);
-    let mut fetch = relay.fetch_fn();
-    let events = paginate_chunk(&authors, Kind::ContactList, cap, |filter| {
-        let fut = fetch(filter);
-        async move { fut.await }
-    })
+    let fetch = relay.fetch_fn();
+    let events = paginate_chunk(&authors, Kind::ContactList, cap, fetch)
     .await
     .expect("pagination must succeed");
 
@@ -151,11 +142,8 @@ async fn budget_guard_errors_on_adversarial_relay() {
     }
 
     let relay = ScriptedRelay::new(windows);
-    let mut fetch = relay.fetch_fn();
-    let result = paginate_chunk(&authors, Kind::ContactList, cap, |filter| {
-        let fut = fetch(filter);
-        async move { fut.await }
-    })
+    let fetch = relay.fetch_fn();
+    let result = paginate_chunk(&authors, Kind::ContactList, cap, fetch)
     .await;
 
     assert!(
@@ -182,11 +170,8 @@ async fn capped_first_window_triggers_second_page() {
     let window2 = vec![event_at(3, 3_000)]; // < cap
     let relay = ScriptedRelay::new(vec![window1, window2]);
 
-    let mut fetch = relay.fetch_fn();
-    let events = paginate_chunk(&authors, Kind::ContactList, cap, |filter| {
-        let fut = fetch(filter);
-        async move { fut.await }
-    })
+    let fetch = relay.fetch_fn();
+    let events = paginate_chunk(&authors, Kind::ContactList, cap, fetch)
     .await
     .expect("pagination must succeed");
 
@@ -220,11 +205,8 @@ async fn short_first_window_does_not_page() {
     let authors = vec![nostr_sdk::Keys::generate().public_key()];
     let relay = ScriptedRelay::new(vec![vec![event_at(1, 9_000), event_at(2, 8_000)]]); // 2 < 5
 
-    let mut fetch = relay.fetch_fn();
-    let events = paginate_chunk(&authors, Kind::ContactList, cap, |filter| {
-        let fut = fetch(filter);
-        async move { fut.await }
-    })
+    let fetch = relay.fetch_fn();
+    let events = paginate_chunk(&authors, Kind::ContactList, cap, fetch)
     .await
     .expect("pagination must succeed");
 
