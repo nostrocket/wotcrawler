@@ -110,7 +110,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 1**
 
-  - [ ] 03-01-PLAN.md — Additive frontier migration (in_progress status + claimed_at + fetch_attempts, pubkey_freshness collapse) + migration idempotency test + Wave 0 test scaffolds (graph_writer.rs, frontier.rs) (GRAPH-02, CRAWL-03, FRESH-01)
+  - [x] 03-01-PLAN.md — Additive frontier migration (in_progress status + claimed_at + fetch_attempts, pubkey_freshness collapse) + migration idempotency test + Wave 0 test scaffolds (graph_writer.rs, frontier.rs) (GRAPH-02, CRAWL-03, FRESH-01)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -153,6 +153,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. Schema & Data Contract | 3/3 | Complete   | 2026-06-12 |
 | 2. Relay Acquisition & Validation | 12/12 | Complete    | 2026-06-13 |
-| 3. Graph Writer & BFS Frontier | 0/3 | Planned | - |
+| 3. Graph Writer & BFS Frontier | 1/3 | In Progress|  |
 | 4. Daemon, Staleness Loop & Observability | 0/TBD | Not started | - |
 | 5. NIP-65 Outbox Routing & Relay Health | 0/TBD | Not started | - |

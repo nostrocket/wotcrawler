@@ -27,7 +27,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Graph Storage
 
 - [x] **GRAPH-01**: PostgreSQL schema stores pubkeys (surrogate bigint ids), directed follow edges, and per-pubkey freshness metadata, with versioned migrations
-- [ ] **GRAPH-02**: A replacing kind-3 is applied as a transactional edge diff (insert added, delete removed); an unchanged list (same event id) touches zero edge rows
+- [x] **GRAPH-02**: A replacing kind-3 is applied as a transactional edge diff (insert added, delete removed); an unchanged list (same event id) touches zero edge rows
 - [x] **GRAPH-03**: A separate process (the spam layer) can read the graph concurrently while the crawler writes, without coordination
 - [x] **GRAPH-04**: The schema is documented as the public contract for downstream consumers
 
@@ -35,12 +35,12 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [ ] **CRAWL-01**: Crawl starts from a single configurable anchor pubkey and discovers pubkeys via BFS over follow edges
 - [ ] **CRAWL-02**: Only pubkeys followed by someone already in the graph are ever enqueued — spam islands nobody legitimate points to are never crawled
-- [ ] **CRAWL-03**: The frontier is DB-resident; after crash or restart the crawler resumes without refetching completed work
+- [x] **CRAWL-03**: The frontier is DB-resident; after crash or restart the crawler resumes without refetching completed work
 - [ ] **CRAWL-04**: In-flight fetch concurrency is bounded end-to-end (backpressure; no unbounded queues or memory growth)
 
 ### Refresh
 
-- [ ] **FRESH-01**: Every pubkey records when its follow-list knowledge was last acquired or confirmed
+- [x] **FRESH-01**: Every pubkey records when its follow-list knowledge was last acquired or confirmed
 - [ ] **FRESH-02**: A staleness scanner enqueues pubkeys whose knowledge exceeds a configurable uniform TTL into the same frontier the initial crawl uses
 - [ ] **FRESH-03**: Each refresh records whether the follow list actually changed, accumulating per-pubkey churn data to ground a future adaptive policy
 
@@ -101,14 +101,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 | RELAY-05 | Phase 5 | Pending |
 | RELAY-06 | Phase 5 | Pending |
 | GRAPH-01 | Phase 1 | Complete |
-| GRAPH-02 | Phase 3 | Pending |
+| GRAPH-02 | Phase 3 | Complete |
 | GRAPH-03 | Phase 1 | Complete |
 | GRAPH-04 | Phase 1 | Complete |
 | CRAWL-01 | Phase 3 | Pending |
 | CRAWL-02 | Phase 3 | Pending |
-| CRAWL-03 | Phase 3 | Pending |
+| CRAWL-03 | Phase 3 | Complete |
 | CRAWL-04 | Phase 3 | Pending |
-| FRESH-01 | Phase 3 | Pending |
+| FRESH-01 | Phase 3 | Complete |
 | FRESH-02 | Phase 4 | Pending |
 | FRESH-03 | Phase 4 | Pending |
 | OBS-01 | Phase 4 | Pending |

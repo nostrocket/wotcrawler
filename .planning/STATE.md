@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 3 context gathered
-last_updated: "2026-06-13T13:55:01.894Z"
-last_activity: 2026-06-13 -- Phase 3 planning complete
+last_updated: "2026-06-13T14:05:43.747Z"
+last_activity: 2026-06-13 -- Phase 03 execution started
 progress:
   total_phases: 5
   completed_phases: 2
-  total_plans: 15
-  completed_plans: 15
+  total_plans: 18
+  completed_plans: 16
   percent: 40
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-11)
 
 **Core value:** From one anchor pubkey, maintain a complete and continuously fresh follow graph of everyone reachable through follows — fetched efficiently — so a downstream trust/spam layer can read it from a shared database at any time.
-**Current focus:** Phase 3 — Graph Writer & BFS Frontier
+**Current focus:** Phase 03 — graph-writer-bfs-frontier
 
 ## Current Position
 
-Phase: 3
-Plan: Not started
+Phase: 03 (graph-writer-bfs-frontier) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-06-13 -- Phase 3 planning complete
+Last activity: 2026-06-13 -- Phase 03 execution started
 
 Progress: [████░░░░░░] 40% (2/5 phases)
 
@@ -68,6 +68,7 @@ Progress: [████░░░░░░] 40% (2/5 phases)
 | Phase 02 P10 | 5 | 2 tasks | 3 files |
 | Phase 02 P11 | 6 | 2 tasks | 4 files |
 | Phase 02 P12 | 3m | 2 tasks | 2 files |
+| Phase 03 P01 | 13 | 4 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -95,6 +96,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 2]: [02-09] WR-03 closed — paginate_chunk_gated gates every fetch_events behind RateLimiterRegistry::acquire (T-02-10); acquire_validated_lists_client sources max_limit from LimitCache (T-02-13); spawn_notice_consumer routes NOTICE/CLOSED into record_notice via the shared registry (T-02-09).
 - [Phase ?]: [Phase 2]: [02-10] BLOCKER 1 closed (CR-03 residual / RELAY-03): paginate_chunk tracks prev_until across iterations; a repeated pinned until=T that stays capped with zero new ids returns Err(FetchTimeout) so the caller requeues rather than silently completing a truncated follow list. Genuine exhaustion (short window, or first page-back into the boundary second) still breaks Ok. Reused FetchTimeout (no new variant). Deterministic-relay test (prefix_for_until_fetch_fn) proves it RED then GREEN.
 - [Phase ?]: [02-11] WR-03 residual / RELAY-04 closed: per-relay GCRA limiter keyed on the caller's individual relay_url threaded through fetch_complete/fetch_complete_with_timeout; pool_label demoted to diagnostics, never the acquire() key. Two pooled relays now mint two independent limiter keys; GCRA state survives pool churn.
+- [Phase ?]: [Phase 3]: [03-01] Frontier migration 0002 shipped: widened pubkeys.status CHECK to include transient in_progress lease state (named pubkeys_status_check, verified via pg_constraint), added internal claimed_at + fetch_attempts columns, redefined pubkey_freshness to collapse in_progress->discovered so the public contract domain stays 4-valued. Wave 0 scaffolds tests/graph_writer.rs (GRAPH-02) and tests/frontier.rs (CRAWL-01..04, FRESH-01) created as named ignored stubs. No .sqlx drift.
 
 ### Pending Todos
 
@@ -115,6 +117,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-13T13:27:36.038Z
+Last session: 2026-06-13T14:05:08.261Z
 Stopped at: Phase 3 context gathered
 Resume file: .planning/phases/03-graph-writer-bfs-frontier/03-CONTEXT.md
