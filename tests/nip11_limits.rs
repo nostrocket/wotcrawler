@@ -3,8 +3,8 @@
 //! is the value the pagination cap will use. Pure parse — no live relay.
 
 use web_of_trust::relay::nip11::{
-    limits_from_json, LimitCache, RelayLimits, DEFAULT_MAX_FILTERS, DEFAULT_MAX_LIMIT,
-    DEFAULT_MAX_SUBSCRIPTIONS,
+    limits_from_bytes, limits_from_json, LimitCache, RelayLimits, DEFAULT_MAX_FILTERS,
+    DEFAULT_MAX_LIMIT, DEFAULT_MAX_SUBSCRIPTIONS, MAX_NIP11_BYTES,
 };
 
 #[test]
@@ -51,6 +51,27 @@ fn non_positive_advertised_values_fall_back_to_defaults() {
     assert_eq!(limits.max_limit, DEFAULT_MAX_LIMIT);
     assert_eq!(limits.max_subscriptions, DEFAULT_MAX_SUBSCRIPTIONS);
     assert_eq!(limits.max_filters, DEFAULT_MAX_FILTERS);
+}
+
+#[test]
+fn oversized_body_is_rejected_without_parsing() {
+    // A hostile relay streams a body larger than MAX_NIP11_BYTES: limits_from_bytes
+    // must reject it (T-02-19 memory DoS) rather than buffer/parse it.
+    let oversized = vec![b'x'; MAX_NIP11_BYTES + 1];
+    let result = limits_from_bytes("wss://hostile.example", &oversized);
+    assert!(
+        result.is_err(),
+        "a body exceeding MAX_NIP11_BYTES must be rejected"
+    );
+}
+
+#[test]
+fn bounded_body_within_limit_parses() {
+    // A body at or under the bound is parsed normally through the existing seam.
+    let json = br#"{ "limitation": { "max_limit": 1000 } }"#;
+    assert!(json.len() <= MAX_NIP11_BYTES);
+    let limits = limits_from_bytes("wss://ok.example", json).expect("bounded body parses");
+    assert_eq!(limits.max_limit, 1000);
 }
 
 #[test]
