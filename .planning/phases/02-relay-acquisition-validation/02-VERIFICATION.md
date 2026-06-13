@@ -1,80 +1,72 @@
 ---
 phase: 02-relay-acquisition-validation
-verified: 2026-06-12T14:10:12Z
+verified: 2026-06-13T08:30:00Z
 status: gaps_found
-score: 6/9 must-haves verified
+score: 7/9 must-haves verified
 overrides_applied: 0
+re_verification:
+  previous_status: gaps_found
+  previous_score: 6/9
+  gaps_closed:
+    - "CR-01 (dedup-before-verify in ingest orchestrator): verified::accept now gates seen.insert; id_squat test passes"
+    - "CR-02 (FetchTimeout never constructed): fetch_window_with_deadline constructs FetchTimeout on elapsed >= timeout; 2 construction sites confirmed"
+    - "CR-04 (no MAX_PAGES_PER_CHUNK budget): MAX_PAGES_PER_CHUNK = 10_000 constant defined and enforced in paginate_chunk"
+    - "CR-05 (quota multiplication under concurrency): Arc<DirectLimiter> per relay; clone-and-await pattern; concurrent test passes"
+    - "CR-06 (NIP-11 no timeout or body bound): LazyLock<reqwest::Client> with .timeout(10s)/.connect_timeout(5s); MAX_NIP11_BYTES stream-and-bail; 9 nip11_limits tests pass"
+    - "WR-01 (backoff zero-delay at high failure counts): failures >= 64 early return cap; saturation test passes"
+    - "WR-02 (no upper clamp on advertised max_limit): clamp_max_limit + MAX_ADVERTISED_LIMIT = 5000; 9 nip11_limits tests pass"
+    - "WR-03 production wiring disconnected: acquire(), get_or_fetch(), record_notice() all have production callers; production_wiring.rs 5/5 pass"
+  gaps_remaining:
+    - "CR-03 (inclusive boundary stall against deterministic relays): partially closed — inclusive boundary is correct but the zero-new-id guard fires on a stalled until=T while genuine events remain. The review's new CR-01 re-opens this."
+    - "WR-03 residual: per-relay limiter keyed on pool_label (joined string) not individual relay_url in fetch_complete_with_timeout"
+  regressions: []
 gaps:
-  - truth: "A capped result set triggers another page (until-window back); EOSE alone is never treated as completeness"
-    status: partial
-    reason: "CR-03 (confirmed in code): page_back uses `oldest - 1` (exclusive), meaning events at the exact boundary second that were cut by the cap are permanently lost. Pagination logic is implemented and exercised by tests, but with a known completeness hole. CR-04 (confirmed in code): paginate_chunk has no page budget or monotonic-progress guard; a relay ignoring `until` drives an infinite loop with unbounded memory growth."
+  - truth: "A capped window pages back inclusively so NO events are lost when a relay caps mid-second — the completeness guarantee"
+    status: failed
+    reason: "The inclusive boundary (page_back returns oldest timestamp, not oldest-1) is correct per se, but the zero-new-id termination guard cannot distinguish 'boundary second exhausted' from 'relay stalled at boundary second with more events remaining'. When more than cap events share the oldest second, a deterministic newest-first relay returns the same cap-sized prefix for every request with until=T. The loop issues Window1(until=now) -> sees A(T) oldest, 2 events = cap -> until=T. Window2(until=T) -> relay returns [A(T), B(T)] -> new_ids=1 (B). Still capped -> until=T. Window3(until=T) -> relay returns [A(T), B(T)] again -> new_ids=0 -> LOOP BREAKS. C(T) is never fetched and is silently lost. The test `inclusive_boundary_keeps_boundary_event` does not catch this because ScriptedRelay is hand-fed window2=[boundary_a, boundary_b] — it scripts the relay to return the cut event, which a real deterministic relay never does. The test validates the mock, not the production invariant."
     artifacts:
       - path: "src/relay/fetch.rs"
-        issue: "page_back returns `saturating_sub(1)` (oldest-1 exclusive), losing events at the boundary second when a cap fires mid-second. No MAX_PAGES guard; `out.extend(events)` is unbounded."
+        issue: "paginate_chunk zero-new-id guard (line 131-133) terminates the loop when until is pinned at an unexhausted boundary second. A deterministic relay returning the same prefix for repeated until=T results in new_ids=0 while genuine events remain. No stall detection exists."
+      - path: "tests/pagination.rs"
+        issue: "inclusive_boundary_keeps_boundary_event (lines 36-71) scripts ScriptedRelay to return the cut boundary event in window2. Real deterministic nearest-first relays return the same cap-sized prefix for a repeated until=T, not the missing sibling. Test validates mock behavior, not production invariant."
     missing:
-      - "page_back must return `oldest` (inclusive) and paginate_chunk must dedup + stop on zero new ids"
-      - "paginate_chunk must enforce a MAX_PAGES_PER_CHUNK budget with a hard error/requeue rather than looping forever"
+      - "Stall detection: track prev_until across loop iterations. When returned >= cap AND until == prev_until AND new_ids == 0, this is an unresolvable stall — surface as Err(FetchTimeout(...)) or a dedicated error so the caller requeues. Never silently complete."
+      - "New test using a deterministic relay mock that returns the same fixed prefix for a repeated until=T (not scripted to vary). Assert the stall surfaces as an error, not a silent return of a truncated event list."
 
-  - truth: "Per-relay rate limiting throttles outbound requests and a rate-limited notice triggers per-relay backoff"
+  - truth: "Per-relay rate limiting throttles outbound requests with one GCRA quota per relay in production"
     status: failed
-    reason: "CR-05 (confirmed in code): RateLimiterRegistry::acquire removes the limiter from the map before awaiting. A concurrent caller finds the entry vacant and creates a fresh limiter with full burst capacity — quota is multiplied by concurrency level, defeating the politeness guarantee (T-02-10). On return, `or_insert(limiter)` keeps the new stateless entry and discards the one with accrued GCRA state (the comment on line 176 documents the exact opposite of what the code does). WR-01 (confirmed via analysis): backoff_delay_unjittered uses u128.checked_shl which silently truncates high bits at failures 119-127 with base=1s (u128 shift of a number whose low set bit is at position 9 pushes all bits above 127), returning Duration::ZERO at failure counts the code claims it saturates to cap. Additionally, WR-03 (confirmed by grep): RateLimiterRegistry.acquire(), LimitCache.get_or_fetch(), and record_notice() have zero callers outside their own modules in src/. The production path acquire_validated_lists -> fetch_complete issues REQs with no acquire() gate."
+    reason: "fetch_complete_with_timeout derives the rate-limiter key from pool_label(client) (src/relay/fetch.rs:273), which joins ALL connected relay URLs into one string (e.g. 'wss://r1.example, wss://r2.example'). This joined string is used as the registry key for both registry.acquire() (line 278) and FetchTimeout labels. Consequences: (1) All relays in the pool share a single GCRA limiter instead of having one each — WR-03's 'per-relay quota' collapses to a shared pool quota, undermining RELAY-04. (2) When pool membership changes (a relay drops or reconnects), the joined string changes, minting a fresh full-burst limiter and discarding accrued GCRA state for the entire pool. acquire_validated_lists_client receives a real relay_url (src/relay/mod.rs:205) and correctly uses it for limit_cache.get_or_fetch and registry.reset, but does NOT thread it into fetch_complete (line 227) — so the two relay_url notions diverge within one call. The production_wiring.rs tests exercise paginate_chunk_gated directly with an explicit relay_url, bypassing fetch_complete_with_timeout; they do not test this failure mode."
     artifacts:
-      - path: "src/relay/rate_limit.rs"
-        issue: "acquire() take-out/put-back creates quota multiplication under concurrency. or_insert() on line 177 keeps the wrong (stateless) limiter. checked_shl on line 111 returns Some(0) for failures 119-127 with base=1s."
+      - path: "src/relay/fetch.rs"
+        issue: "fetch_complete_with_timeout line 273: `let relay_url = pool_label(client).await;` uses the joined pool label as the limiter key. This is documented as 'Label for FetchTimeout AND the per-relay rate-limiter key' but collapsing all relays into one key defeats per-relay throttling."
       - path: "src/relay/mod.rs"
-        issue: "acquire_validated_lists_client calls fetch_complete with no registry.acquire() gate. No notification handler spawned to feed record_notice()."
-      - path: "src/relay/fetch.rs"
-        issue: "fetch_complete_with_timeout calls client.fetch_events with no rate limiter gate before each REQ."
+        issue: "acquire_validated_lists_client has a real per-relay relay_url (line 205) but passes it to fetch_complete without threading it through. fetch_complete internally re-derives the wrong (pool-wide) key."
     missing:
-      - "Store Arc<DirectLimiter> in the map; clone the Arc, release the lock, await — no removal/reinsertion"
-      - "Call registry.acquire(relay_url) before each client.fetch_events call in the production path"
-      - "Spawn a notifications() consumer routing NOTICE/CLOSED messages into record_notice()/backoff()"
-      - "Fix backoff_delay_unjittered: saturate at cap when failures >= 64 (shift any set bit past bit 63 in u128 for ns values)"
+      - "Thread the caller's relay_url through fetch_complete / fetch_complete_with_timeout as an explicit parameter; use it as the rate-limiter registry key and the FetchTimeout label. Reserve pool_label for human-readable diagnostics only."
+      - "Test that covers the full production path (fetch_complete_with_timeout) with two relays in the pool and asserts each relay has its own independent GCRA limiter key (e.g., verify the limiter map has two entries keyed on individual URLs, not one entry keyed on the joined string)."
 
-  - truth: "The crawler connects to a configurable curated relay set and reconnects with exponential backoff and jitter after a drop"
-    status: partial
-    reason: "connect_curated is implemented and wired correctly. The app-side backoff_delay function provides capped-exponential-with-jitter. However backoff_delay_unjittered has the WR-01 arithmetic bug (zero delay at failures 119-127 with default 1s base), which means after 119+ consecutive failures against a relay, the crawler retries with NO delay — the opposite of a saturating cap. The connect path itself is sound; the backoff schedule has a silent defect at high failure counts."
-    artifacts:
-      - path: "src/relay/rate_limit.rs"
-        issue: "backoff_delay_unjittered returns Duration::ZERO for failures 119-127 with base=1s due to u128 bit truncation in checked_shl (WR-01 confirmed in code)."
-    missing:
-      - "Replace checked_shl with an early saturation check: if failures >= 64, return cap directly (any 2^64 factor in nanoseconds exceeds any reasonable cap)"
-
-  - truth: "RelayError::FetchTimeout is never constructed — timed-out windows are silently recorded as complete"
-    status: failed
-    reason: "CR-02 (confirmed in code): FetchTimeout variant exists in error.rs but grep across the entire src/ tree finds it is never constructed. fetch_complete_with_timeout passes a timeout to client.fetch_events, but the SDK returns a partial Ok on timeout (nostr-relay-pool 0.44.1 on timeout drops the activity sender and stream ends without error). No Instant::now()/elapsed check or tokio::time::timeout wrapper is present in fetch.rs. The `started.elapsed() >= timeout` detection from the PLAN is absent. The SUMMARY claims 'a timed-out window surfaces as RelayError::FetchTimeout so the caller requeues' — this is not implemented."
-    artifacts:
-      - path: "src/relay/fetch.rs"
-        issue: "FetchTimeout is never constructed. The SDK timeout returns partial Ok, not an error. No elapsed-time check exists."
-      - path: "src/error.rs"
-        issue: "FetchTimeout(String) variant is dead code — only in error.rs, never constructed."
-    missing:
-      - "Detect timeout expiration independently: record Instant::now() before fetch_events, check elapsed >= timeout after Ok return, construct RelayError::FetchTimeout if elapsed"
-      - "Add a test covering the timed-out window requeue path"
-
-  - truth: "NIP-11 HTTP fetch has no timeout and no response-size bound"
-    status: failed
-    reason: "CR-06 (confirmed in code): fetch_limits uses reqwest::Client::new() with no timeout set (line 136). The response is read with resp.text().await with no body-size bound (line 146). A hostile relay can accept the TCP connection and never respond (hanging the crawler) or stream an arbitrarily large body. The project's own Pitfall 9 rule requires every network fetch to carry a deadline."
-    artifacts:
-      - path: "src/relay/nip11.rs"
-        issue: "reqwest::Client::new() has no default timeout. resp.text() reads unbounded body."
-    missing:
-      - "Build reqwest client with .timeout(Duration::from_secs(10)).connect_timeout(Duration::from_secs(5)).build()"
-      - "Bound the body: read bytes() and reject if > MAX_NIP11_BYTES (e.g. 64 KiB)"
-      - "Build the client once (e.g. lazily via once_cell), not per call"
-deferred: []
 human_verification:
   - test: "Live-relay politeness verification"
     expected: "Sustained run against one curated relay shows <= DEFAULT_REQS_PER_SECOND requests per second; rate-limited notices produce escalating backoff delays visible in logs"
-    why_human: "Cannot verify relay politeness or notice-driven behavior without a live relay connection and time-series observation"
+    why_human: "Cannot verify relay politeness or notice-driven behavior without a live relay connection and time-series observation. Note: the pool_label WR-03 residual means this would also reveal the per-relay quota collapsing to a single shared quota across all relays."
 ---
 
-# Phase 2: Relay Acquisition & Validation Verification Report
+# Phase 2: Relay Acquisition & Validation Re-Verification Report
 
 **Phase Goal:** The crawler can pull kind-3 and kind:10002 events from a curated relay set politely and completely, and only correct, deduplicated, newest-wins follow lists emerge from the acquisition half.
-**Verified:** 2026-06-12T14:10:12Z
+**Verified:** 2026-06-13T08:30:00Z
 **Status:** gaps_found
-**Re-verification:** No — initial verification
+**Re-verification:** Yes — after gap-closure plans 02-05 through 02-09
+
+## Context
+
+Plans 02-05..02-09 ran as gap-closure for BLOCKERs CR-01..CR-06 and WARNINGs WR-01..WR-03 from the initial verification. A fresh code review (02-REVIEW.md, status: issues_found) confirmed that most fixes landed correctly but flagged:
+
+1. **New BLOCKER (re-opened from prior CR-03):** The inclusive boundary page-back combined with the zero-new-id stop guard cannot guarantee completeness when more than `cap` events share the boundary second and the relay is deterministic/newest-first. The fix made the boundary inclusive but did not add stall detection.
+
+2. **Residual WR-03 (downgraded from prior BLOCKER but still a gap):** `fetch_complete_with_timeout` keys the rate limiter on `pool_label(client)` — a joined string of ALL relay URLs — not the individual relay URL. Per-relay throttling collapses to a shared pool quota.
+
+The prior 5 BLOCKERs (CR-01, CR-02, CR-04, CR-05, CR-06) and Warnings (WR-01, WR-02) are **confirmed closed** by code inspection and test results.
 
 ## Goal Achievement
 
@@ -82,20 +74,20 @@ human_verification:
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|---------|
-| 1 | Forged/invalid-sig event rejected before acceptance and counted | VERIFIED | verify::accept calls Event::verify() (id+sig); ingest_invalid_signature metric incremented; tests/verify_gate.rs passes (4/4) |
-| 2 | Wrong kind/author event dropped and counted | VERIFIED | verify::accept checks kind==want_kind && pubkey in requested; ingest_unsolicited metric; verify_gate::unsolicited tests pass |
-| 3 | Same event id from multiple relays processed at most once | VERIFIED | ingest_events HashSet<EventId> seen-set before verify gate; tests/dedup.rs passes |
-| 4 | Future-dated event beyond configurable clamp rejected; newest-wins; same-ts tie → lowest id | VERIFIED | replaceable::pick_winner: future_clamp_secs saturating cutoff, max_by with then_with(b.id.cmp(&a.id)); tests/replaceable.rs 4 tests pass |
-| 5 | Malformed p-tags skipped; oversized follow list bounded without panicking | VERIFIED | follow_list::followee_pubkeys uses Tags::public_keys() (skips malformed); reject-not-truncate on cap; no unwrap() in follow_list.rs |
-| 6 | kind:10002 events resolved under identical replaceable rules | VERIFIED | pick_winner is kind-agnostic over &Event; tests/relay_list.rs passes (2/2) |
-| 7 | Crawler connects curated relay set with reconnect; exponential backoff + jitter | PARTIAL | connect_curated wired correctly; backoff_delay provides exponential+jitter; BUT backoff_delay_unjittered returns ZERO for failures 119-127 with base=1s (WR-01 confirmed) |
-| 8 | NIP-11 limits read/cached; max_limit caps pagination; missing docs → defaults | PARTIAL | LimitCache and limits_from_doc implemented correctly; BUT fetch_limits has no reqwest timeout or body-size bound (CR-06); AND LimitCache.get_or_fetch has zero callers in the production path (WR-03) |
-| 9 | Per-relay rate limiting throttles requests; rate-limited notice triggers backoff | FAILED | RateLimiterRegistry exists but has two implementation bugs (CR-05: quota multiplication, wrong limiter kept); backoff_delay_unjittered has zero-delay defect at high failure counts (WR-01); acquire() has zero callers in the production fetch path (WR-03) |
-| 10 | Capped result triggers another page; EOSE never treated as completeness | PARTIAL | paginate_chunk + page_back implemented; E2E test passes; BUT page_back uses oldest-1 (exclusive boundary, CR-03 confirmed) and paginate_chunk has no page budget guard against adversarial relays (CR-04 confirmed) |
-| 11 | Timed-out windows requeued, not treated as complete | FAILED | FetchTimeout variant defined in error.rs but never constructed anywhere in src/. fetch_complete_with_timeout passes a timeout to SDK, but SDK returns partial Ok on timeout. No elapsed-time detection. SUMMARY claim is not implemented. |
-| 12 | Fetch→ingest wired: ValidatedFollowList emerges end-to-end | VERIFIED | acquire_validated_lists and acquire_validated_lists_client implemented in relay/mod.rs; E2E test (acquire_pipeline.rs) passes |
+| 1 | Forged/invalid-sig event rejected before acceptance and counted | VERIFIED | verify::accept gates seen.insert in ingest/mod.rs:140-143; id_squat.rs test passes |
+| 2 | Wrong kind/author event dropped and counted | VERIFIED | verify::accept checks kind==want_kind && pubkey in requested; verify_gate tests pass |
+| 3 | Same verified event id from multiple relays processed at most once | VERIFIED | seen.insert runs only after verify::accept (CR-01 closed); id_squat test load-bearing (RED commit 62190dc proves it failed before fix) |
+| 4 | Future-dated event beyond clamp rejected; newest-wins; same-ts tie → lowest id | VERIFIED | replaceable::pick_winner: future_clamp_secs saturating cutoff, max_by+then_with; 4 replaceable tests pass |
+| 5 | Malformed p-tags skipped; oversized follow list bounded without panicking | VERIFIED | follow_list::followee_pubkeys uses Tags::public_keys(); reject-not-truncate on cap; follow_list_bounds tests pass |
+| 6 | kind:10002 events resolved under identical replaceable rules | VERIFIED | pick_winner is kind-agnostic; relay_list.rs 2/2 pass |
+| 7 | Crawler connects curated relay set with reconnect; exponential backoff + jitter | VERIFIED | connect_curated wired; backoff_delay_unjittered: failures>=64 early return cap (WR-01 closed); saturation test sweeps 64..=127 asserting non-zero and <= cap |
+| 8 | NIP-11 limits read/cached; max_limit clamped; missing docs → defaults; timeout + body bound | VERIFIED | LazyLock<reqwest::Client> with .timeout(10s)/.connect_timeout(5s); MAX_NIP11_BYTES stream-and-bail; MAX_ADVERTISED_LIMIT=5000 via clamp_max_limit; 9 nip11_limits tests pass; LimitCache wired to production path via get_or_fetch(relay_url) in acquire_validated_lists_client |
+| 9 | Per-relay rate limiting throttles requests; pool key is per-relay, not pool-wide | FAILED | fetch_complete_with_timeout derives relay_url from pool_label(client) (line 273) — a joined string of all relay URLs, not the individual relay URL passed to acquire_validated_lists_client. The rate limiter is keyed on the pool, not per relay. Production wiring tests exercise paginate_chunk_gated directly (explicit relay_url) and do not catch this path. |
+| 10 | Capped result triggers another page; EOSE never treated as completeness; no silent event loss | FAILED | page_back is inclusive (CR-03 addressed). BUT: zero-new-id guard fires as 'exhausted' when the loop is stalled at until=T with more events remaining at that second. A deterministic newest-first relay returning the same cap-sized prefix for repeated until=T causes new_ids=0 while C(T) is never fetched. inclusive_boundary_keeps_boundary_event test does not cover this: it scripts the mock to return the cut event, which real relays do not do. MAX_PAGES_PER_CHUNK budget guards against an adversarial always-new-id relay (CR-04 closed) but not the stall case. |
+| 11 | Timed-out windows requeued, not treated as complete | VERIFIED | fetch_window_with_deadline constructs RelayError::FetchTimeout when elapsed >= timeout (2 sites: line 103 and 208); fetch_timeout.rs 2/2 pass |
+| 12 | Fetch->ingest wired: ValidatedFollowList emerges end-to-end | VERIFIED | acquire_validated_lists and acquire_validated_lists_client wired; E2E test acquire_pipeline.rs passes |
 
-**Score:** 6/9 truths from plan must_haves verified (using the 9 plan-declared must_haves, which map to the 12 observable truths above)
+**Score:** 7/9 must-haves verified (using the 9 plan-declared must_haves)
 
 ### Required Artifacts
 
@@ -104,52 +96,60 @@ human_verification:
 | `src/ingest/verify.rs` | Sig + kind/author gate | VERIFIED | accept() implemented; Event::verify(); metrics counters present |
 | `src/ingest/replaceable.rs` | Clamp + newest-wins + tie-break | VERIFIED | pick_winner with saturating clamp, max_by+then_with |
 | `src/ingest/follow_list.rs` | p-tag extraction + dedup + cap | VERIFIED | public_keys() skip, self-drop, reject-not-truncate |
-| `src/ingest/mod.rs` | Orchestrator + ValidatedFollowList | VERIFIED | ingest_events implemented; ValidatedFollowList with 4 fields |
-| `src/relay/mod.rs` | connect_curated + acquire seam | VERIFIED | connect_curated, acquire_validated_lists, acquire_validated_lists_client |
-| `src/relay/nip11.rs` | NIP-11 fetch + LimitCache | STUB | LimitCache substantive; fetch_limits has no timeout (CR-06); LimitCache unwired from production path |
-| `src/relay/rate_limit.rs` | Governor limiter + notice backoff | STUB | RateLimiterRegistry code exists; acquire() has concurrency bug (CR-05); WR-01 zero-delay defect; unwired from production path (WR-03) |
-| `src/relay/fetch.rs` | Author-chunked pagination | PARTIAL | paginate_chunk + page_back implemented; CR-03 boundary bug; CR-04 no page budget; CR-02 no FetchTimeout construction |
+| `src/ingest/mod.rs` | Orchestrator + ValidatedFollowList, dedup-after-verify | VERIFIED | verify::accept before seen.insert (CR-01 closed); ValidatedFollowList 4 fields |
+| `src/relay/mod.rs` | connect_curated + acquire seam wired to registry/cache/notices | VERIFIED | connect_curated, acquire_validated_lists_client wired to LimitCache + RateLimiterRegistry + spawn_notice_consumer |
+| `src/relay/nip11.rs` | NIP-11 fetch with timeout + body bound + LazyLock client + MAX_ADVERTISED_LIMIT | VERIFIED | NIP11_CLIENT LazyLock with .timeout(10s)/.connect_timeout(5s); MAX_NIP11_BYTES stream-and-bail; clamp_max_limit; 9 tests pass |
+| `src/relay/rate_limit.rs` | Governor limiter with Arc-per-relay, backoff saturation | VERIFIED | Arc<DirectLimiter> in map; clone-and-await; failures>=64 early cap; 7 tests pass |
+| `src/relay/fetch.rs` | Inclusive page-back, MAX_PAGES_PER_CHUNK, FetchTimeout, pool_label key | STUB | page_back inclusive (line 68); MAX_PAGES_PER_CHUNK=10_000 (line 48); FetchTimeout constructed (lines 103, 208). BUT pool_label used as rate-limiter key (line 273) — not per-relay; stall detection missing for deterministic-relay boundary exhaustion |
 | `tests/acquire_pipeline.rs` | E2E test | VERIFIED | 1/1 passes |
-| `tests/pagination.rs` | RELAY-03 pagination test | VERIFIED | 3/3 passes (tests do not cover the CR-03 or CR-04 failure modes) |
+| `tests/pagination.rs` | RELAY-03 pagination test including inclusive boundary | PARTIAL | 7/7 pass, but inclusive_boundary_keeps_boundary_event scripts the mock to return the cut event (not real relay behavior); stall-at-boundary-second not tested |
+| `tests/fetch_timeout.rs` | FetchTimeout requeue test | VERIFIED | 2/2 pass |
+| `tests/id_squat.rs` | CR-01 id-squat attack test | VERIFIED | 1/1 passes; load-bearing (RED commit 62190dc) |
+| `tests/production_wiring.rs` | WR-03 wiring test | PARTIAL | 5/5 pass, but tests exercise paginate_chunk_gated with explicit relay_url; fetch_complete_with_timeout pool_label key not tested |
 
 ### Key Link Verification
 
 | From | To | Via | Status | Details |
 |------|----|-----|--------|---------|
-| `src/relay/mod.rs` | `src/relay/fetch.rs fetch_complete` | acquire_validated_lists_client | WIRED | fetch_complete called from production wrapper |
+| `src/relay/mod.rs` | `src/relay/fetch.rs fetch_complete` | acquire_validated_lists_client | WIRED | fetch_complete called from production wrapper (line 227) |
 | `src/relay/mod.rs` | `src/ingest/mod.rs ingest_events` | acquire_validated_lists | WIRED | ingest::ingest_events called; all events route through it |
-| `src/relay/fetch.rs` | `src/relay/nip11.rs LimitCache` | max_limit feeds pagination cap | NOT_WIRED | max_limit is a parameter to fetch_complete but no production caller sources it from LimitCache |
-| `src/relay/fetch.rs` | `src/relay/rate_limit.rs acquire()` | governor until_ready gates every REQ | NOT_WIRED | acquire() has zero callers in src/; the production path issues REQs unthrottled |
-| `tests/acquire_pipeline.rs` | `tests/mock_relay/mod.rs` | E2E test uses mock relay | WIRED | ScriptedRelay used in acquire_pipeline |
+| `src/relay/mod.rs` | `src/relay/nip11.rs LimitCache::get_or_fetch` | limit_cache.get_or_fetch(relay_url) | WIRED | line 220 sources max_limit from cache; correct relay_url used |
+| `src/relay/fetch.rs paginate_chunk_gated` | `src/relay/rate_limit.rs acquire()` | registry.acquire(relay_url) before each REQ | WIRED | line 178; relay_url passed from paginate_chunk_gated caller |
+| `src/relay/fetch.rs fetch_complete_with_timeout` | `src/relay/rate_limit.rs acquire()` | pool_label key | PARTIAL | acquire IS called (line 278), but relay_url is pool_label joined string, not per-relay URL. The gate exists but the key is wrong. |
+| `src/relay/mod.rs` | `src/relay/rate_limit.rs record_notice` | spawn_notice_consumer -> handle_relay_message | WIRED | handle_relay_message calls registry.record_notice; spawn_notice_consumer wired in mod.rs |
+| `tests/production_wiring.rs` | `tests/mock_relay/mod.rs` | ScriptedRelay | WIRED | paginate_chunk_gated tested with injected ScriptedRelay |
 
 ### Data-Flow Trace (Level 4)
 
 | Artifact | Data Variable | Source | Produces Real Data | Status |
 |----------|---------------|--------|--------------------|--------|
-| `src/relay/rate_limit.rs` | per-relay GCRA token | RateLimiterRegistry::acquire() | No — never called | DISCONNECTED |
-| `src/relay/nip11.rs` | max_limit | LimitCache::get_or_fetch() | No — never called from production path | DISCONNECTED |
-| `src/ingest/mod.rs` | ValidatedFollowList | ingest_events | Yes — wired and tested | FLOWING |
+| `src/relay/rate_limit.rs` | per-relay GCRA token | registry.acquire(relay_url) via paginate_chunk_gated | Yes — called before each window REQ | FLOWING (but keyed on pool_label in production path through fetch_complete_with_timeout) |
+| `src/relay/nip11.rs` | max_limit | limit_cache.get_or_fetch(relay_url) in acquire_validated_lists_client | Yes — per-relay cache wired | FLOWING |
+| `src/ingest/mod.rs` | ValidatedFollowList | ingest_events after verify->dedup->replaceable->follow_list | Yes — wired and tested | FLOWING |
+| `src/relay/mod.rs` | failure_count escalation | record_notice via spawn_notice_consumer | Yes — consumer spawned, handle_relay_message wired | FLOWING |
 
 ### Behavioral Spot-Checks
 
 | Behavior | Command | Result | Status |
 |----------|---------|--------|--------|
-| All INGEST tests pass | `cargo test --test verify_gate dedup replaceable relay_list follow_list_bounds` | 16/16 passed | PASS |
-| All RELAY unit tests pass | `cargo test --test reconnect_policy rate_limit_backoff nip11_limits pagination` | 17/17 passed | PASS |
+| All INGEST tests pass | `cargo test --test verify_gate dedup id_squat replaceable relay_list follow_list_bounds` | 1+1+1+4+2+3 = 12 passed | PASS |
+| All RELAY unit tests pass | `cargo test --test reconnect_policy rate_limit_backoff nip11_limits pagination fetch_timeout production_wiring` | 1+7+9+7+2+5 = 31 passed | PASS |
 | E2E acquire pipeline | `cargo test --test acquire_pipeline` | 1/1 passed | PASS |
-| FetchTimeout constructed on timeout | `grep -rn "FetchTimeout(" src/` | zero results | FAIL |
-| RateLimiterRegistry called in production path | `grep -rn "acquire\|get_or_fetch\|record_notice" src/ \| grep -v "rate_limit.rs\|nip11.rs"` | zero caller sites | FAIL |
+| FetchTimeout constructed on timeout | `grep -rn "FetchTimeout(" src/` | 2 construction sites in src/relay/fetch.rs (line 103, 208) | PASS |
+| Rate limiter keyed on individual relay_url in production path | `grep -n "pool_label" src/relay/fetch.rs` | Line 273: `let relay_url = pool_label(client).await;` — joined string, not individual URL | FAIL |
+| Stall detection for boundary-second > cap events | `grep -n "prev_until\|stalled\|stall" src/relay/fetch.rs` | No stall detection exists | FAIL |
+| Full suite green | `cargo test --tests` | 19 result lines, all 0 failed | PASS |
 
 ### Requirements Coverage
 
 | Requirement | Source Plan | Description | Status | Evidence |
 |-------------|-------------|-------------|--------|---------|
-| RELAY-01 | 02-01, 02-03 | Reconnect + exponential backoff + jitter | PARTIAL | connect_curated wired; backoff_delay implemented; WR-01 zero-delay defect at failures 119-127 |
-| RELAY-02 | 02-01, 02-03 | NIP-11 limits read and respected | PARTIAL | LimitCache implemented; fetch_limits missing timeout; max_limit not sourced from cache in production path |
-| RELAY-03 | 02-03, 02-04 | Pagination + EOSE never trusted as complete | PARTIAL | paginate_chunk + page_back implemented; CR-03 exclusive boundary loses events; CR-04 no page budget |
-| RELAY-04 | 02-03 | Per-relay rate limiting + notice backoff | FAILED | RateLimiterRegistry exists but unwired from production path; acquire() has concurrency bug |
+| RELAY-01 | 02-01, 02-03, 02-08 | Reconnect + exponential backoff + jitter | VERIFIED | connect_curated wired; backoff_delay_unjittered failures>=64 early-return cap; saturation test 64..=127 non-zero; concurrent_acquires_share_one_limiter passes |
+| RELAY-02 | 02-01, 02-03, 02-07, 02-09 | NIP-11 limits read and respected in production | VERIFIED | LimitCache.get_or_fetch wired in acquire_validated_lists_client; MAX_NIP11_BYTES + MAX_ADVERTISED_LIMIT; NIP11_CLIENT with timeouts; 9 nip11_limits tests pass |
+| RELAY-03 | 02-03, 02-04, 02-05 | Pagination + EOSE never trusted as complete | PARTIAL | paginate_chunk + page_back inclusive implemented; MAX_PAGES_PER_CHUNK guards adversarial relay; FetchTimeout on elapsed timeout. BUT: zero-new-id guard fires as exhaustion when loop is stalled at boundary second with >cap events; stall-at-boundary not tested against deterministic relay behavior |
+| RELAY-04 | 02-03, 02-08, 02-09 | Per-relay rate limiting + notice backoff in production | PARTIAL | RateLimiterRegistry::acquire wired via paginate_chunk_gated; spawn_notice_consumer + handle_relay_message wired. BUT: fetch_complete_with_timeout passes pool_label (joined string) as relay_url to paginate_chunk_gated, collapsing per-relay throttling to a single pool quota |
 | INGEST-01 | 02-02 | Sig verification + count before accept | VERIFIED | verify::accept with Event::verify() + metrics |
-| INGEST-02 | 02-02 | Duplicate ids processed once | VERIFIED | HashSet<EventId> seen-set in ingest_events |
+| INGEST-02 | 02-02, 02-06 | Duplicate ids processed once, dedup AFTER verify | VERIFIED | HashSet<EventId> seen-set; verify::accept gates seen.insert; id_squat test load-bearing |
 | INGEST-03 | 02-02 | Future-clamp + newest-wins + lowest-id tie-break | VERIFIED | pick_winner with saturating clamp + max_by+then_with |
 | INGEST-04 | 02-02 | Malformed p-tags skipped; oversized list bounded | VERIFIED | public_keys() skip + reject-not-truncate |
 | INGEST-05 | 02-02 | kind:10002 under same replaceable rules | VERIFIED | pick_winner is kind-agnostic; relay_list.rs tests pass |
@@ -158,47 +158,29 @@ human_verification:
 
 | File | Line | Pattern | Severity | Impact |
 |------|------|---------|----------|--------|
-| `src/ingest/mod.rs` | 128-132 | Dedup-before-verify: seen.insert(event.id) before verify::accept | BLOCKER (CR-01) | A hostile relay can id-squat a victim's genuine event — forged copy consumes the id, genuine copy from honest relay is skipped as "duplicate" |
-| `src/relay/fetch.rs` | 42-50 | page_back uses oldest-1 (exclusive boundary) | BLOCKER (CR-03) | Events at the cap boundary second are permanently lost — data loss on every capped window at scale |
-| `src/relay/fetch.rs` | 68-86 | paginate_chunk has no page budget | BLOCKER (CR-04) | Adversarial relay ignoring `until` drives infinite loop + unbounded memory |
-| `src/relay/fetch.rs` | all | FetchTimeout never constructed | BLOCKER (CR-02) | SDK returns partial Ok on timeout; timed-out windows marked complete; silent data loss |
-| `src/relay/rate_limit.rs` | 157-179 | acquire() take-out/put-back: quota multiplication under concurrency | BLOCKER (CR-05) | N concurrent callers get N independent fresh limiters; politeness guarantee is void |
-| `src/relay/rate_limit.rs` | 177 | or_insert(limiter) keeps wrong (stateless) entry | BLOCKER (CR-05) | Accrued GCRA state discarded on every contended acquire |
-| `src/relay/nip11.rs` | 136 | reqwest::Client::new() with no timeout | BLOCKER (CR-06) | Hostile relay can hang the crawler permanently |
-| `src/relay/nip11.rs` | 146 | resp.text() with no body-size bound | WARNING (CR-06) | Hostile relay can exhaust memory |
-| `src/relay/rate_limit.rs` | 111 | checked_shl returns Some(0) for failures 119-127 with base=1s | WARNING (WR-01) | Zero backoff delay at highest failure counts — retries immediately instead of saturating at cap |
-| `src/relay/nip11.rs` | 82-86 | clamp_limit accepts arbitrarily large positive i32 | WARNING (WR-02) | Hostile NIP-11 doc advertising max_limit=2000000000 restores Pitfall 1 (EOSE treated as complete) |
-| `src/relay/mod.rs` | production path | RateLimiterRegistry, LimitCache, record_notice unwired | BLOCKER (WR-03) | RELAY-02 and RELAY-04 are library code with passing tests, not enforced behavior |
+| `src/relay/fetch.rs` | 273 | `pool_label(client)` used as rate-limiter registry key | BLOCKER (WR-03 residual) | All relays share one GCRA limiter; per-relay quota destroyed; key changes on relay connect/disconnect |
+| `src/relay/fetch.rs` | 131-133 | zero-new-id guard terminates loop without stall detection | BLOCKER (CR-03 residual) | A deterministic newest-first relay with >cap events at the boundary second causes silent truncation; the loop mistakes a stalled until=T for genuine exhaustion |
+| `tests/pagination.rs` | 48 | ScriptedRelay is hand-fed the cut boundary event in window2 | WARNING | Test validates mock behavior (a relay varying its prefix), not production invariant (a deterministic relay returning the same prefix); the boundary-stall failure mode is untested |
 
 ### Human Verification Required
 
 #### 1. Live-Relay Politeness
 
 **Test:** Run acquire_validated_lists_client against one real curated relay for 60 seconds; observe outbound REQ rate and response to NOTICE messages.
-**Expected:** REQ rate <= 4/second per relay; rate-limited NOTICE messages produce escalating delays in logs.
-**Why human:** Cannot verify without a live relay and time-series observation. Note: currently rate limiter is unwired, so this test would reveal WR-03 as a live failure.
+**Expected:** REQ rate <= 4/second per relay; rate-limited NOTICE messages produce escalating delays in logs. With the pool_label key bug, all relays in the pool would share a single 4 req/sec quota (not each having their own), which would be visible as under-throttling when multiple relays are connected simultaneously.
+**Why human:** Cannot verify relay politeness or notice-driven behavior without a live relay connection and time-series observation.
 
 ## Gaps Summary
 
-The code review's 6 Critical / 3 Warning findings are substantially confirmed by code inspection. Five gaps block the phase goal:
+Plans 02-05 through 02-09 closed most of the original gaps. The code review identified two remaining issues that block the phase goal:
 
-**CR-01 (BLOCKER) — Dedup-before-verify in the ingest orchestrator and fetch.rs dedup_by_id.** The seen-set is populated before verify::accept runs. A hostile relay can id-squat a victim's genuine follow list: the forged copy (carrying the real event's claimed id) is iterated first, its id enters the seen-set, verification fails, and the genuine copy from an honest relay is then silently discarded as "duplicate". This directly inverts INGEST-02's purpose. The same attack works at the fetch level via dedup_by_id.
+**BLOCKER 1 (CR-03 residual — boundary-second completeness stall):** The inclusive page-back fix correctly sets `until = oldest` rather than `oldest - 1`. However, the zero-new-id termination guard cannot distinguish "boundary second genuinely exhausted" from "deterministic relay serving the same cap-sized prefix for a pinned until=T while additional events remain at that second." With `cap = 2` and three events `A(T)`, `B(T)`, `C(T)`: Window 1 returns `[N(T+1), A(T)]`, oldest=T, capped → until=T. Window 2 returns `[A(T), B(T)]`, new_ids=1 (B), still capped → until=T. Window 3 returns `[A(T), B(T)]` again, new_ids=0 → loop breaks. C(T) is silently lost. The test `inclusive_boundary_keeps_boundary_event` scripts the mock to return `boundary_b` in window 2, which a real deterministic relay never does. The fix must detect the stall (until is pinned and returned >= cap and new_ids == 0) and surface it as a requeue error rather than silent completion.
 
-**CR-02 (BLOCKER) — FetchTimeout never constructed; timed-out windows recorded as complete.** The SDK returns partial Ok on timeout (verified in nostr-relay-pool 0.44.1 vendored source). No elapsed-time check or tokio::time::timeout wrapper exists in fetch.rs. The PLAN and SUMMARY both claim this works; the code proves it does not. Data loss from slow/hostile relays is silent and unauditable.
+**BLOCKER 2 (WR-03 residual — pool_label as rate-limiter key):** `fetch_complete_with_timeout` at line 273 derives `relay_url = pool_label(client).await`, which joins all connected relay URLs into a single string. This string is then passed to `paginate_chunk_gated` as the registry key. Consequences: (1) all connected relays share one GCRA limiter instead of having independent per-relay quotas; (2) pool membership changes mint a new limiter and discard accrued GCRA state. `acquire_validated_lists_client` has the correct individual `relay_url` but does not thread it into `fetch_complete`. The production wiring tests bypass this path by calling `paginate_chunk_gated` directly.
 
-**CR-03 + CR-04 (BLOCKER) — Pagination completeness loss + adversarial infinite loop.** page_back's exclusive oldest-1 boundary permanently loses events at the boundary second when a relay caps mid-second. paginate_chunk has no page budget, allowing a relay that ignores `until` to drive an infinite loop. The tests do not cover these failure modes.
-
-**CR-05 (BLOCKER) — Rate limiter is broken under concurrency and unwired from production.** The take-out/put-back acquire() multiplies quota by concurrency; the wrong (stateless) limiter is retained. More critically, acquire() has zero callers in the production path — RELAY-04 mechanisms (rate limiter, notice backoff, NIP-11 cache) are exercised only in their own tests, never in acquire_validated_lists.
-
-**CR-06 (BLOCKER) — NIP-11 fetch has no timeout or body-size bound.** reqwest::Client::new() carries no deadline. A hostile relay can hang the crawler or exhaust memory through the NIP-11 path.
-
-**WR-01 (WARNING) — Backoff zero-delay defect.** backoff_delay_unjittered returns Duration::ZERO for failure counts 119-127 with the default 1s base due to u128 bit truncation in checked_shl. The fix described in the code comment ("we must NOT truncate") is documented but not implemented.
-
-**WR-02 (WARNING) — No upper bound on advertised NIP-11 limit.** clamp_limit accepts any positive i32; a relay advertising max_limit=2000000000 defeats the pagination completeness logic.
-
-The ingest gate (INGEST-01 through INGEST-05) is sound and well-tested. The fundamental acquisition mechanisms (RELAY-01 connect, RELAY-02 parse, RELAY-03 pagination logic, RELAY-04 governor) have correct implementations in their modules. The phase goal is not achieved because: (a) five critical correctness defects exist in the acquisition layer, (b) RELAY-02 and RELAY-04 mechanisms are unwired from the production fetch path, and (c) the completeness claim ("complete") is undermined by CR-02, CR-03, and CR-04.
+The ingest gate (INGEST-01..05) is sound, well-tested, and fully closed. The previous BLOCKERs (CR-01 id-squat, CR-02 FetchTimeout, CR-04 page budget, CR-05 Arc limiter, CR-06 NIP-11 timeout) and Warnings (WR-01 backoff saturation, WR-02 MAX_ADVERTISED_LIMIT) are all confirmed closed.
 
 ---
 
-_Verified: 2026-06-12T14:10:12Z_
+_Verified: 2026-06-13T08:30:00Z_
 _Verifier: Claude (gsd-verifier)_
