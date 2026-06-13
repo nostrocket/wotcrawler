@@ -77,7 +77,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
   - [x] 02-05-PLAN.md — fetch.rs completeness/safety: inclusive page-back boundary (CR-03), MAX_PAGES_PER_CHUNK budget + new-id stop (CR-04), FetchTimeout on elapsed timeout (CR-02), drop pre-verify dedup (CR-01 fetch half) [RELAY-03]
   - [x] 02-06-PLAN.md — ingest.rs dedup-after-verify so a forged id-squat cannot suppress a genuine follow list (CR-01) [INGEST-02]
-  - [ ] 02-07-PLAN.md — nip11.rs request/connect timeouts + MAX_NIP11_BYTES body bound (CR-06) + MAX_ADVERTISED_LIMIT upper clamp (WR-02) [RELAY-02]
+  - [x] 02-07-PLAN.md — nip11.rs request/connect timeouts + MAX_NIP11_BYTES body bound (CR-06) + MAX_ADVERTISED_LIMIT upper clamp (WR-02) [RELAY-02]
   - [ ] 02-08-PLAN.md — rate_limit.rs shared Arc<DirectLimiter> acquire under concurrency (CR-05) + backoff saturation at failures>=64 (WR-01) [RELAY-01, RELAY-04]
 
 **Gap-Closure Wave 2** *(blocked on 02-05/02-07/02-08; wires the corrected mechanisms into production)*
@@ -133,7 +133,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Schema & Data Contract | 3/3 | Complete   | 2026-06-12 |
-| 2. Relay Acquisition & Validation | 6/9 | In Progress|  |
+| 2. Relay Acquisition & Validation | 7/9 | In Progress|  |
 | 3. Graph Writer & BFS Frontier | 0/TBD | Not started | - |
 | 4. Daemon, Staleness Loop & Observability | 0/TBD | Not started | - |
 | 5. NIP-65 Outbox Routing & Relay Health | 0/TBD | Not started | - |

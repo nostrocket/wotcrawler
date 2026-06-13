@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 02-05-PLAN.md - fetch BLOCKERs CR-01 to CR-04 closed
-last_updated: "2026-06-13T06:50:50.630Z"
+last_updated: "2026-06-13T06:55:33.431Z"
 last_activity: 2026-06-13 -- Phase 02 execution started
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 12
-  completed_plans: 9
+  completed_plans: 10
   percent: 20
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 ## Current Position
 
 Phase: 02 (relay-acquisition-validation) — EXECUTING
-Plan: 3 of 9
+Plan: 4 of 9
 Status: Ready to execute
 Last activity: 2026-06-13 -- Phase 02 execution started
 
@@ -61,6 +61,7 @@ Progress: [█████░░░░░] 50%
 | Phase 02 P04 | 4 | 1 task | 2 files |
 | Phase 02 P05 | 8 | 2 tasks | 3 files |
 | Phase 02 P06 | 1 | 1 tasks | 3 files |
+| Phase 02 P07 | 3 | - tasks | - files |
 
 ## Accumulated Context
 
@@ -83,6 +84,7 @@ Recent decisions affecting current work:
 - [Phase 2]: [02-04] Acquire pipeline shipped — Phase 02 complete. relay::acquire_validated_lists composes the raw paged fetch stream through ingest::ingest_events (composition-only seam: zero validation logic, grep-gated); acquire_validated_lists_client is the production wrapper over fetch_complete + a live Client. E2E test drives a two-window adversarially-polluted mock-relay stream through the wired pipeline and proves exactly the deduped/newest-wins/self-drop-filtered ValidatedFollowList emerges (forged/unsolicited/future-dated excluded; second-window event wins, proving resolution across both paged windows — T-02-14/T-02-15). src/ingest untouched (ingest_events already pub). No deviations, no new deps.
 - [Phase ?]: 02-05 Fetch completeness and safety BLOCKERs closed: page_back now INCLUSIVE (CR-03); paginate_chunk dedups cross-window, stops on zero new ids, and enforces MAX_PAGES_PER_CHUNK=10000 budget (CR-04); fetch_window_with_deadline constructs RelayError::FetchTimeout on elapsed greater-or-equal timeout because the SDK returns a partial Ok (CR-02); pre-verify dedup_by_id removed so dedup follows verify::accept to defeat id-squat (CR-01 fetch half).
 - [Phase 02-06]: CR-01 closed: ingest_events now verifies before dedup so only verified event ids enter the cross-relay seen-set; a forged id-squat copy (T-02-14) can no longer consume a genuine id and suppress the honest follow list. Genuine dedup preserved.
+- [Phase ?]: [02-07] NIP-11 fetch hardened (CR-06/WR-02): shared LazyLock reqwest client with 10s request + 5s connect timeout (T-02-18); MAX_NIP11_BYTES=64KiB stream-and-bail body bound (T-02-19); MAX_ADVERTISED_LIMIT=5000 upper-clamp on advertised max_limit so an absurd value cannot defeat count-vs-cap pagination (T-02-13, Pitfall 1).
 
 ### Pending Todos
 
@@ -103,6 +105,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-13T06:50:15.435Z
+Last session: 2026-06-13T06:55:21.981Z
 Stopped at: Completed 02-05-PLAN.md - fetch BLOCKERs CR-01 to CR-04 closed
 Resume file: None
