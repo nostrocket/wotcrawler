@@ -4,7 +4,9 @@
 //! - `store` (Phase 1) — the Postgres write layer.
 //! - `relay` (Phase 2) — relay-pool acquisition, NIP-11 limits, pagination.
 //! - `ingest` (Phase 2) — the validation gate that emits `ValidatedFollowList`.
+//! - `crawl` (Phase 3) — the DB-resident BFS frontier (claim/lease/seed/requeue).
 
+pub mod crawl;
 pub mod error;
 pub mod ingest;
 pub mod relay;
