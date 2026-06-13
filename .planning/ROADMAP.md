@@ -89,6 +89,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   - [x] 02-10-PLAN.md — fetch.rs paginate_chunk prev_until stall detection: a deterministic relay re-serving the same cap-sized prefix for a pinned until=T with more events at the boundary second surfaces an Err (requeue) instead of silent truncation (CR-03 residual) [RELAY-03]
   - [x] 02-11-PLAN.md — fetch.rs thread the per-relay relay_url through fetch_complete/fetch_complete_with_timeout as the GCRA limiter key (pool_label demoted to diagnostics); two pooled relays get two independent limiter keys (WR-03 residual) [RELAY-04]
 
+**Gap-Closure Wave 4** *(from 02-VERIFICATION.md re-verification run 3; closes the final BLOCKER CR-01-new; edits src/relay/fetch.rs so it runs after 02-10/02-11)*
+
+  - [ ] 02-12-PLAN.md — fetch.rs paginate_chunk: fire the boundary stall on the FIRST capped zero-new-id re-request via page_back(returned, cap, oldest) == current_until, closing the no-newer-event silent truncation the prev_until guard missed (CR-01-new) [RELAY-03]
+
 ### Phase 3: Graph Writer & BFS Frontier
 
 **Goal**: Accepted follow lists become durable graph state via transactional edge diffs, and a DB-resident reachability-gated BFS frontier drives discovery and survives crashes without redoing completed work.
