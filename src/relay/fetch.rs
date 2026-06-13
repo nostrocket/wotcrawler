@@ -132,24 +132,37 @@ where
         }
 
         // Zero new ids: either genuine exhaustion OR an unresolvable boundary
-        // stall (CR-03 residual / T-02-15). Distinguish them:
+        // stall (CR-03 residual / T-02-15 / CR-01-new, 02-VERIFICATION.md
+        // gaps_remaining). Distinguish them:
         //
-        // - Boundary-second STALL — all three hold: the window is still capped
-        //   (`returned >= cap`, so the relay may be truncating), `until` did NOT
-        //   advance since the last fetch (`prev_until == Some(current_until)` —
-        //   pinned at the boundary second), and the re-request yielded nothing
-        //   new (`new_ids == 0`). A deterministic newest-first relay is re-serving
-        //   the SAME cap-sized prefix for the pinned `until=T` while more events
-        //   remain at that second. Completing here would silently truncate the
-        //   follow list, so surface a requeue Err instead.
+        // - Boundary-second STALL — the window is still capped (`returned >=
+        //   cap`, so the relay may be truncating), the re-request yielded nothing
+        //   new (`new_ids == 0`), AND page-back would re-pin the SAME `until`
+        //   rather than advance it (`page_back(returned, cap, oldest) ==
+        //   Some(current_until)`). The latter fires on the FIRST capped
+        //   zero-new-id re-request of a pinned boundary second — including the
+        //   no-newer-event case (CR-01-new) where EVERY pool event shares the
+        //   boundary second `T`, so `until` becomes `T` on the first page-back and
+        //   the relay re-serves the same cap-sized prefix while siblings at `T`
+        //   remain. The prior `prev_until == Some(current_until)` 2-visit guard is
+        //   retained (OR-combined) as the union/superset case; the page_back check
+        //   is the stronger first-visit detector and no longer depends on
+        //   prev_until. A deterministic newest-first relay re-serving the SAME
+        //   cap-sized prefix for the pinned `until=T` while more events remain
+        //   would silently truncate the follow list, so surface a requeue Err.
         //
-        // - Genuine EXHAUSTION — any other zero-new-id case: a short window
-        //   (`returned < cap`), or `until` JUST advanced into this boundary
-        //   second (the FIRST page-back to `until=T` has `prev_until !=
-        //   Some(current_until)`), so a zero-new-id result is the real end of the
-        //   data. Break with Ok — never turn legitimate exhaustion into an error.
+        // - Genuine EXHAUSTION — any other zero-new-id case. A short window
+        //   (`returned < cap`) makes page_back return None, so the stall condition
+        //   is false. A window whose oldest event is at a second OLDER than
+        //   `current_until` makes page_back return `Some(older)` != current_until
+        //   (the window genuinely advanced into older data), so zero new ids there
+        //   is the real end of data. Break with Ok — never turn legitimate
+        //   exhaustion into an error.
         if new_ids == 0 {
-            if returned >= cap && prev_until == Some(current_until) {
+            if returned >= cap
+                && (prev_until == Some(current_until)
+                    || page_back(returned, cap, oldest) == Some(current_until))
+            {
                 return Err(RelayError::FetchTimeout(format!(
                     "boundary-second stall: relay re-served the same cap-sized \
                      prefix for pinned until={} with more events remaining",

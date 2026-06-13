@@ -97,30 +97,44 @@ async fn cross_window_dedup_keeps_each_event_once() {
 }
 
 #[tokio::test]
-async fn zero_new_id_window_stops_even_when_capped() {
-    // CR-04: a capped window contributing only already-seen ids is genuine
-    // exhaustion (the boundary re-request returned nothing new) — stop, do NOT
-    // keep paging on the >= cap signal alone.
+async fn capped_reserved_prefix_at_pinned_boundary_surfaces_error() {
+    // RECONCILED for CR-01-new (was `zero_new_id_window_stops_even_when_capped`).
+    // Window 1 = [A(5000), B(4000)] == cap -> page_back(2,2,Some(4000)) pins
+    // until=4000. Window 2 re-serves the SAME [A, B] == cap with every id already
+    // seen (new_ids=0), and its oldest is 4000 == current_until, so
+    // page_back(2,2,Some(4000)) == Some(4000) == Some(current_until): the relay is
+    // re-serving the same cap-sized prefix for the pinned boundary second while
+    // (per the strengthened invariant) a sibling could remain cut at second 4000.
+    //
+    // The corrected invariant — "a capped re-served-prefix at a pinned boundary
+    // is a stall, never silent completion" — means this is the boundary-second
+    // stall, NOT genuine exhaustion: paginate_chunk must surface a requeue Err on
+    // this FIRST capped zero-new-id re-request rather than complete Ok([A, B]).
+    // The prior Ok/len==2 expectation was itself an instance of the silent-
+    // truncation bug (CR-01-new) and is updated to expect Err.
     let cap = 2;
     let authors = vec![nostr_sdk::Keys::generate().public_key()];
 
     let a = event_at(1, 5_000);
     let b = event_at(2, 4_000);
     let window1 = vec![a.clone(), b.clone()]; // == cap
-    // Window 2 is also == cap but every id is already seen -> zero new ids.
+    // Window 2 is also == cap but every id is already seen -> zero new ids, and
+    // its oldest (4000) equals the pinned until -> page_back re-pins -> stall.
     let window2 = vec![a.clone(), b.clone()];
 
     let relay = ScriptedRelay::new(vec![window1, window2]);
     let fetch = relay.fetch_fn();
-    let events = paginate_chunk(&authors, Kind::ContactList, cap, fetch)
-    .await
-    .expect("pagination must succeed");
+    let result = paginate_chunk(&authors, Kind::ContactList, cap, fetch).await;
 
-    assert_eq!(events.len(), 2, "no new ids in window 2 -> union stays at 2");
+    assert!(
+        matches!(result, Err(RelayError::FetchTimeout(_))),
+        "a capped window re-serving the same prefix at a pinned boundary second \
+         is a stall (no silent truncated Ok), got {result:?}"
+    );
     assert_eq!(
         relay.untils().len(),
         2,
-        "exactly two REQs: window 2's zero-new-id result stops paging"
+        "exactly two REQs: window 2's capped zero-new-id re-request surfaces the stall"
     );
 }
 
@@ -258,7 +272,7 @@ async fn no_newer_event_boundary_stall_surfaces_error() {
     // the three same-second events the prefix returns (that depends on the stable
     // newest-first sort over equal created_at) — only that the result is Err.
     assert!(
-        matches!(result, Err(_)),
+        result.is_err(),
         "a deterministic relay with NO event newer than the boundary second, \
          re-serving the same cap-sized prefix for a pinned until=T, must surface \
          a requeue Err rather than a silent truncated Ok, got {result:?}"
