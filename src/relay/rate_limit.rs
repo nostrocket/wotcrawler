@@ -21,7 +21,7 @@
 
 use std::collections::HashMap;
 use std::num::NonZeroU32;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use governor::clock::DefaultClock;
@@ -123,7 +123,7 @@ pub struct RateLimiterRegistry {
     reqs_per_second: NonZeroU32,
     base: Duration,
     cap: Duration,
-    limiters: Mutex<HashMap<String, DirectLimiter>>,
+    limiters: Mutex<HashMap<String, Arc<DirectLimiter>>>,
     /// Per-relay consecutive failure/notice count driving the backoff schedule.
     failures: Mutex<HashMap<String, u32>>,
 }
@@ -155,26 +155,25 @@ impl RateLimiterRegistry {
     /// configured per-relay quota; the limiter for `relay_url` is created on first
     /// use. Returns once a token is available.
     pub async fn acquire(&self, relay_url: &str) -> Result<(), RelayError> {
-        // `until_ready` borrows the limiter across an await, so we cannot hold the
-        // map lock over it. Clone is not available on RateLimiter; instead we
-        // park the relay's limiter behind its own entry and await against a raw
-        // pointer-free copy of the GCRA decision by re-checking in a small loop.
-        //
-        // governor limiters are not `Clone`, so we keep the limiter inside the
-        // map and drive `until_ready` by temporarily taking the limiter out,
-        // awaiting, then putting it back. Single relay url contention is rare and
-        // the await is short.
+        // `until_ready` borrows the limiter across an await, so we cannot hold
+        // the map lock over it. The limiter is stored behind an `Arc`: we lock
+        // the map, get-or-insert the relay's shared `Arc<DirectLimiter>`, clone
+        // the `Arc` (cheap refcount bump — the GCRA state is shared, not copied),
+        // drop the lock, then await on the clone. The limiter is NEVER removed
+        // from the map, so concurrent callers for the same relay drive the same
+        // GCRA state and the per-relay quota holds regardless of concurrency
+        // (CR-05 / threat T-02-10). The old remove/reinsert minted a fresh
+        // full-burst limiter for every concurrent caller, multiplying quota by
+        // concurrency.
         let limiter = {
             let mut map = self.limiters.lock().expect("rate-limiter map not poisoned");
-            map.remove(relay_url).unwrap_or_else(|| {
-                RateLimiter::direct(Quota::per_second(self.reqs_per_second))
-            })
+            Arc::clone(
+                map.entry(relay_url.to_string()).or_insert_with(|| {
+                    Arc::new(RateLimiter::direct(Quota::per_second(self.reqs_per_second)))
+                }),
+            )
         };
         limiter.until_ready().await;
-        let mut map = self.limiters.lock().expect("rate-limiter map not poisoned");
-        // If another caller created a limiter for this relay while we awaited,
-        // keep the one that has accrued state (ours) and drop the spare.
-        map.entry(relay_url.to_string()).or_insert(limiter);
         Ok(())
     }
 
