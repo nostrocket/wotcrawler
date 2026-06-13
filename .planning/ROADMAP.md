@@ -58,7 +58,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. For each pubkey only the newest valid kind-3 (and kind:10002) is applied — future-dated created_at beyond the configurable clamp is rejected and same-timestamp ties break to the lowest event id.
   5. Malformed p-tags are skipped and oversized follow lists are bounded by a configurable cap without crashing the pipeline; per-relay rate limiting keeps request rates polite and rate-limit notices trigger backoff.
 
-**Plans**: 4 plans
+**Plans**: 9 plans (4 original + 5 gap-closure from 02-VERIFICATION.md)
 
 **Wave 1**
 
@@ -72,6 +72,17 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Wave 3** *(blocked on Wave 2; wires the two halves together)*
 
   - [x] 02-04-PLAN.md — Relay→ingest pipeline seam: fetch output through the ingest gate so ValidatedFollowList emerges end-to-end, proven by acquire_pipeline E2E test (RELAY-03 + INGEST-01..05)
+
+**Gap-Closure Wave 1** *(from 02-VERIFICATION.md; independent file-sets, run in parallel)*
+
+  - [x] 02-05-PLAN.md — fetch.rs completeness/safety: inclusive page-back boundary (CR-03), MAX_PAGES_PER_CHUNK budget + new-id stop (CR-04), FetchTimeout on elapsed timeout (CR-02), drop pre-verify dedup (CR-01 fetch half) [RELAY-03]
+  - [ ] 02-06-PLAN.md — ingest.rs dedup-after-verify so a forged id-squat cannot suppress a genuine follow list (CR-01) [INGEST-02]
+  - [ ] 02-07-PLAN.md — nip11.rs request/connect timeouts + MAX_NIP11_BYTES body bound (CR-06) + MAX_ADVERTISED_LIMIT upper clamp (WR-02) [RELAY-02]
+  - [ ] 02-08-PLAN.md — rate_limit.rs shared Arc<DirectLimiter> acquire under concurrency (CR-05) + backoff saturation at failures>=64 (WR-01) [RELAY-01, RELAY-04]
+
+**Gap-Closure Wave 2** *(blocked on 02-05/02-07/02-08; wires the corrected mechanisms into production)*
+
+  - [ ] 02-09-PLAN.md — production-path wiring: gate fetch_events behind acquire(), source max_limit from LimitCache, spawn notifications consumer for record_notice/backoff (WR-03) [RELAY-02, RELAY-04]
 
 ### Phase 3: Graph Writer & BFS Frontier
 
@@ -122,7 +133,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Schema & Data Contract | 3/3 | Complete   | 2026-06-12 |
-| 2. Relay Acquisition & Validation | 4/4 | Complete | 2026-06-12 |
+| 2. Relay Acquisition & Validation | 5/9 | In Progress|  |
 | 3. Graph Writer & BFS Frontier | 0/TBD | Not started | - |
 | 4. Daemon, Staleness Loop & Observability | 0/TBD | Not started | - |
 | 5. NIP-65 Outbox Routing & Relay Health | 0/TBD | Not started | - |
