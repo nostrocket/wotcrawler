@@ -6,20 +6,89 @@
 //! concurrency with `FOR UPDATE SKIP LOCKED` no-double-claim (CRAWL-04), and
 //! terminal-status `last_fetched_at` stamping (FRESH-01).
 //!
-//! Plan 03-02 fills the frontier-module tests (seed/claim/lease/reclaim/requeue);
-//! the end-to-end crawl-loop tests (BFS reachability, bounded concurrency, the
-//! crash-resume integration) land in 03-03 once the worker loop exists and are
-//! kept here as `#[ignore]` scaffolds so the suite contract stays visible.
+//! Plan 03-02 filled the frontier-module tests (seed/claim/lease/reclaim/requeue);
+//! plan 03-03 fills the end-to-end crawl-loop tests (BFS reachability, structural
+//! spam-island exclusion, crash-resume no-redo, bounded concurrency, terminal
+//! stamping) now that the bounded worker loop exists. All tests are active (no
+//! ignored scaffolds remain).
 //!
 //! Requires a running Docker daemon (testcontainers Postgres).
 
 mod common;
 
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
 use chrono::Utc;
+use nostr_sdk::{Event, Kind, PublicKey, Timestamp};
 use web_of_trust::crawl::frontier::{
-    claim_batch, reclaim_stale_on_startup, requeue_or_fail, seed_anchor,
+    claim_batch, reclaim_stale_on_startup, requeue_or_fail, seed_anchor, ClaimedAuthor,
 };
+use web_of_trust::crawl::run_crawl;
+use web_of_trust::error::RelayError;
 use web_of_trust::store::{self, pubkeys::upsert_pubkey};
+
+/// A deterministic, offline, `Send` scripted relay graph for the end-to-end
+/// crawl-loop tests. Maps each author's pubkey to the signed kind-3 event that
+/// "the relays" return for it. Unlike `mock_relay::ScriptedRelay` (which is
+/// `Rc<RefCell>` / `!Send` and so cannot cross a `tokio::spawn`), this is
+/// `Arc`-backed so the bounded worker loop can hold it across spawned workers.
+///
+/// `fetch_union` returns a closure of the exact shape `run_crawl` expects: given
+/// an owned claimed batch it produces the raw `Vec<Event>` union for those
+/// authors (modeling D-08's cross-relay union before the single ingest pass).
+#[derive(Clone)]
+struct ScriptedGraph {
+    /// author pubkey bytes -> the signed kind-3 event that author publishes.
+    events: Arc<HashMap<Vec<u8>, Event>>,
+}
+
+impl ScriptedGraph {
+    fn new(events: Vec<Event>) -> Self {
+        let map = events
+            .into_iter()
+            .map(|e| (e.pubkey.to_bytes().to_vec(), e))
+            .collect();
+        Self {
+            events: Arc::new(map),
+        }
+    }
+
+    /// Build the raw cross-relay union for a claimed batch: every scripted event
+    /// whose author is in the batch (an author with no scripted event contributes
+    /// nothing — modeling a `not_found`).
+    fn union_for(&self, batch: &[ClaimedAuthor]) -> Vec<Event> {
+        batch
+            .iter()
+            .filter_map(|c| self.events.get(&c.pubkey).cloned())
+            .collect()
+    }
+
+    /// A `fetch_union` closure for `run_crawl` (no instrumentation).
+    fn fetch_fn(
+        &self,
+    ) -> impl Fn(Vec<ClaimedAuthor>) -> std::future::Ready<Result<Vec<Event>, RelayError>>
+           + Clone
+           + Send
+           + Sync
+           + 'static {
+        let me = self.clone();
+        move |batch: Vec<ClaimedAuthor>| std::future::ready(Ok(me.union_for(&batch)))
+    }
+}
+
+/// Build a signed kind-3 event for `author` (seed) following each `followees`
+/// seed, dated `created_at`. Mirrors `common::signed_event` but takes seeds so
+/// the BFS graph reads declaratively in the tests.
+fn follows_event(author_seed: u8, followees: &[u8], created_at: u64) -> Event {
+    let author = common::keys(author_seed);
+    let p_tags: Vec<PublicKey> = followees
+        .iter()
+        .map(|&s| common::keys(s).public_key())
+        .collect();
+    common::signed_event(&author, Kind::ContactList, Timestamp::from_secs(created_at), &p_tags)
+}
 
 /// Deterministic 32-byte pubkey from a single seed (mirrors concurrency::pk).
 fn pk(seed: u16) -> [u8; 32] {
@@ -348,37 +417,363 @@ async fn spam_island_never_crawled() -> anyhow::Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// 03-03 scaffolds (end-to-end crawl loop) — bodies land once the worker loop
-// exists. Kept `#[ignore]` so the suite contract stays visible.
+// 03-03 end-to-end crawl-loop tests (bounded worker pool drives the frontier
+// against the deterministic offline ScriptedGraph — never live relays).
 // ---------------------------------------------------------------------------
 
-/// CRAWL-01: a crawl from a configured anchor discovers every reachable pubkey
-/// via BFS — the anchor and all multi-hop followees end `fetched`.
+/// Read the surrogate id for a seed's pubkey (the BFS graph references authors by
+/// seed; this resolves the row the loop created for them).
+async fn id_of_seed(pool: &sqlx::PgPool, seed: u8) -> anyhow::Result<Option<i64>> {
+    let key = common::keys(seed).public_key().to_bytes().to_vec();
+    let id: Option<i64> = sqlx::query_scalar::<_, i64>("SELECT id FROM pubkeys WHERE pubkey = $1")
+        .bind(key)
+        .fetch_optional(pool)
+        .await?;
+    Ok(id)
+}
+
+/// CRAWL-01/02: a crawl from a single configured anchor discovers every pubkey
+/// reachable through follows via BFS — anchor and all multi-hop followees end
+/// `fetched` — while an isolated spam-island pubkey that nobody reachable follows
+/// is never even inserted (CRAWL-02 structural). Graph: anchor(1) -> {2,3};
+/// 2 -> {4}; 3 -> {4,5}; 4,5 -> {} (leaves). Spam island: seed 99, followed by
+/// nobody reachable.
 #[tokio::test]
-#[ignore] // 03-03 — needs the bounded worker loop
 async fn bfs_reaches_full_component() -> anyhow::Result<()> {
+    let (_pg, pool) = fresh_db().await?;
+
+    // Build the scripted relay graph. Leaves (4,5) publish empty follow lists so
+    // they terminate `fetched` rather than `not_found`.
+    let graph = ScriptedGraph::new(vec![
+        follows_event(1, &[2, 3], 1000),
+        follows_event(2, &[4], 1000),
+        follows_event(3, &[4, 5], 1000),
+        follows_event(4, &[], 1000),
+        follows_event(5, &[], 1000),
+        // Seed 99 (the spam island) publishes a follow list too, but NOBODY
+        // reachable follows it, so it is never upserted and never fetched.
+        follows_event(99, &[1], 1000),
+    ]);
+
+    let anchor = common::keys(1).public_key().to_bytes().to_vec();
+    let stats = run_crawl(
+        &pool,
+        &anchor,
+        8,
+        4,
+        Kind::ContactList,
+        Timestamp::now(),
+        3600,
+        10_000,
+        web_of_trust::crawl::DEFAULT_MAX_ATTEMPTS,
+        graph.fetch_fn(),
+    )
+    .await?;
+
+    assert_eq!(stats.reclaimed_on_startup, 0, "fresh DB has no orphans");
+    assert!(stats.authors_claimed >= 5, "all 5 reachable authors must be claimed");
+
+    // Every reachable pubkey ended `fetched`.
+    for seed in [1u8, 2, 3, 4, 5] {
+        let id = id_of_seed(&pool, seed)
+            .await?
+            .unwrap_or_else(|| panic!("reachable seed {seed} must be a row"));
+        assert_eq!(
+            status_of(&pool, id).await?,
+            "fetched",
+            "reachable seed {seed} must end fetched (CRAWL-01)"
+        );
+    }
+
+    // CRAWL-02: the spam island (seed 99) was never inserted — nobody reachable
+    // follows it, so structural reachability kept it out of the frontier entirely.
+    assert!(
+        id_of_seed(&pool, 99).await?.is_none(),
+        "spam-island seed 99 must never be a row (CRAWL-02 structural)"
+    );
+
+    Ok(())
+}
+
+/// CRAWL-02 (end-to-end): an isolated pubkey nobody reachable follows is never
+/// fetched. Distinct from `bfs_reaches_full_component`'s never-inserted island:
+/// here we PRE-SEED the island as a `discovered` row by hand (as if a prior run
+/// left it), give it no scripted event, and assert the crawl resolves it to a
+/// non-`fetched` terminal status rather than synthesizing edges for it.
+#[tokio::test]
+async fn spam_island_never_fetched_endtoend() -> anyhow::Result<()> {
+    let (_pg, pool) = fresh_db().await?;
+
+    // anchor(1) -> {2}; 2 -> {} (leaf). The island (seed 50) is NOT in this graph.
+    let graph = ScriptedGraph::new(vec![
+        follows_event(1, &[2], 1000),
+        follows_event(2, &[], 1000),
+    ]);
+
+    // Pre-seed the island so it IS a discovered row, but no reachable author
+    // follows it and it has no scripted event -> it must resolve to not_found,
+    // never fetched (no edges are ever synthesized for it).
+    let island = upsert_pubkey(&pool, &common::keys(50).public_key().to_bytes()).await?;
+
+    let anchor = common::keys(1).public_key().to_bytes().to_vec();
+    run_crawl(
+        &pool,
+        &anchor,
+        8,
+        4,
+        Kind::ContactList,
+        Timestamp::now(),
+        3600,
+        10_000,
+        web_of_trust::crawl::DEFAULT_MAX_ATTEMPTS,
+        graph.fetch_fn(),
+    )
+    .await?;
+
+    assert_ne!(
+        status_of(&pool, island).await?,
+        "fetched",
+        "an island with no follow list must never be fetched (CRAWL-02)"
+    );
+    // It has no outgoing edges (the crawl never invented follows for it).
+    let island_edges: i64 =
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM follows WHERE follower_id = $1")
+            .bind(island)
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(island_edges, 0, "no edges may be synthesized for the island");
+
     Ok(())
 }
 
 /// CRAWL-03: after a crash (orphaned `in_progress` rows) and restart, a row that
 /// was already `fetched` before the crash is never re-fetched on the second pass.
+/// We simulate a crash by claiming a batch (-> in_progress) and dropping it
+/// without finishing, and a prior success by marking a row `fetched` with a known
+/// `fetch_count`; the second `run_crawl` reclaims the orphan and completes it,
+/// but never touches the pre-`fetched` row's `fetch_count`.
 #[tokio::test]
-#[ignore] // 03-03 — needs the bounded worker loop
 async fn crash_resume_no_redo() -> anyhow::Result<()> {
+    let (_pg, pool) = fresh_db().await?;
+
+    // Graph: anchor(1) -> {2}; 2 -> {} (leaf).
+    let graph = ScriptedGraph::new(vec![
+        follows_event(1, &[2], 1000),
+        follows_event(2, &[], 1000),
+    ]);
+
+    // --- Simulate a crash mid-crawl: seed the anchor + an extra orphan, claim
+    // them (-> in_progress), then "die" without finishing. ---
+    let anchor_id = seed_anchor(&pool, &common::keys(1).public_key().to_bytes()).await?;
+    let orphan_id = upsert_pubkey(&pool, &common::keys(7).public_key().to_bytes()).await?;
+    let claimed = claim_batch(&pool, 100).await?;
+    assert_eq!(claimed.len(), 2, "anchor + orphan claimed -> in_progress");
+
+    // Simulate a row that completed BEFORE the crash: mark seed 2's future row
+    // `fetched` by hand with a known fetch_count, so we can prove it is not
+    // re-fetched. (It is reachable from the anchor, so the crawl could try to
+    // re-fetch it if the claim were too broad — it must NOT.)
+    let pre_fetched = upsert_pubkey(&pool, &common::keys(2).public_key().to_bytes()).await?;
+    sqlx::query(
+        "UPDATE pubkeys SET status = 'fetched', fetch_count = 5, last_fetched_at = now() WHERE id = $1",
+    )
+    .bind(pre_fetched)
+    .execute(&pool)
+    .await?;
+
+    let fc_before: i64 =
+        sqlx::query_scalar::<_, i64>("SELECT fetch_count FROM pubkeys WHERE id = $1")
+            .bind(pre_fetched)
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(fc_before, 5);
+
+    // --- Restart: run_crawl seeds (idempotent) + reclaims the 2 orphans, then
+    // crawls. The pre-`fetched` seed-2 row must NEVER be re-claimed. ---
+    let anchor = common::keys(1).public_key().to_bytes().to_vec();
+    let stats = run_crawl(
+        &pool,
+        &anchor,
+        8,
+        4,
+        Kind::ContactList,
+        Timestamp::now(),
+        3600,
+        10_000,
+        web_of_trust::crawl::DEFAULT_MAX_ATTEMPTS,
+        graph.fetch_fn(),
+    )
+    .await?;
+
+    assert_eq!(
+        stats.reclaimed_on_startup, 2,
+        "the 2 orphaned in_progress rows must be reclaimed (CRAWL-03)"
+    );
+
+    // The orphaned anchor was reclaimed and completed -> fetched.
+    assert_eq!(status_of(&pool, anchor_id).await?, "fetched");
+    // The orphan(7) had no scripted event -> terminal not_found (still resolved).
+    assert_eq!(status_of(&pool, orphan_id).await?, "not_found");
+
+    // The pre-`fetched` row's fetch_count is UNCHANGED — it was never re-fetched.
+    let fc_after: i64 =
+        sqlx::query_scalar::<_, i64>("SELECT fetch_count FROM pubkeys WHERE id = $1")
+            .bind(pre_fetched)
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(
+        fc_after, 5,
+        "a pre-fetched row must never be re-fetched after restart (CRAWL-03 no-redo)"
+    );
+
     Ok(())
 }
 
-/// CRAWL-04: with concurrency cap K, at most K batches are ever in flight.
+/// CRAWL-04: with concurrency cap K, the number of batches in flight at once never
+/// exceeds K. We instrument the injected fetch closure with an `AtomicUsize` that
+/// is bumped on entry and decremented on exit, holding a short delay in between so
+/// multiple batches overlap; the max observed in-flight count must be <= K.
 #[tokio::test]
-#[ignore] // 03-03 — needs the bounded worker loop
 async fn bounded_concurrency() -> anyhow::Result<()> {
+    let (_pg, pool) = fresh_db().await?;
+
+    // Seed a wide fan-out so there are many small batches to overlap: anchor(1)
+    // follows 20 leaves (seeds 100..120), each a leaf publishing an empty list.
+    let leaves: Vec<u8> = (100u8..120).collect();
+    let mut events = vec![follows_event(1, &leaves, 1000)];
+    for &s in &leaves {
+        events.push(follows_event(s, &[], 1000));
+    }
+    let graph = ScriptedGraph::new(events);
+
+    let k = 3usize;
+    let in_flight = Arc::new(AtomicUsize::new(0));
+    let max_seen = Arc::new(AtomicUsize::new(0));
+
+    // Wrap the graph fetch with the in-flight instrument + a small delay so
+    // overlap is observable. batch_size = 1 forces one batch per author so up to
+    // K can overlap.
+    let fetch = {
+        let graph = graph.clone();
+        let in_flight = Arc::clone(&in_flight);
+        let max_seen = Arc::clone(&max_seen);
+        move |batch: Vec<ClaimedAuthor>| {
+            let graph = graph.clone();
+            let in_flight = Arc::clone(&in_flight);
+            let max_seen = Arc::clone(&max_seen);
+            async move {
+                let cur = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                max_seen.fetch_max(cur, Ordering::SeqCst);
+                tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+                let union = graph.union_for(&batch);
+                in_flight.fetch_sub(1, Ordering::SeqCst);
+                Ok::<Vec<Event>, RelayError>(union)
+            }
+        }
+    };
+
+    let anchor = common::keys(1).public_key().to_bytes().to_vec();
+    run_crawl(
+        &pool,
+        &anchor,
+        1, // batch_size = 1 -> one batch per author, maximizing overlap
+        k,
+        Kind::ContactList,
+        Timestamp::now(),
+        3600,
+        10_000,
+        web_of_trust::crawl::DEFAULT_MAX_ATTEMPTS,
+        fetch,
+    )
+    .await?;
+
+    let peak = max_seen.load(Ordering::SeqCst);
+    assert!(peak >= 2, "the wide fan-out must actually overlap batches (saw {peak})");
+    assert!(
+        peak <= k,
+        "in-flight batch count {peak} exceeded the concurrency cap {k} (CRAWL-04)"
+    );
+
     Ok(())
 }
 
 /// FRESH-01: every terminal transition (`fetched`, `not_found`, `failed`) stamps
-/// `last_fetched_at` through the full crawl loop.
+/// `last_fetched_at` through the full crawl loop. We construct a graph producing
+/// all three: anchor(1) -> {2 (has list -> fetched), 8 (no list -> not_found)};
+/// plus a pre-seeded row (seed 60) whose fetch always errors -> failed after the
+/// retry cap. The failing author is driven by a fetch closure that errors for it.
 #[tokio::test]
-#[ignore] // 03-03 — needs the bounded worker loop
 async fn last_fetched_at_stamped_on_terminal() -> anyhow::Result<()> {
+    let (_pg, pool) = fresh_db().await?;
+
+    // anchor(1) -> {2, 8}; 2 -> {} (leaf, fetched); 8 has NO scripted event
+    // (relays answer, no list -> not_found).
+    let graph = ScriptedGraph::new(vec![
+        follows_event(1, &[2, 8], 1000),
+        follows_event(2, &[], 1000),
+    ]);
+
+    // Pre-seed seed 60 as a discovered row whose fetch always errors -> failed.
+    let failing = upsert_pubkey(&pool, &common::keys(60).public_key().to_bytes()).await?;
+    let failing_pk = common::keys(60).public_key().to_bytes().to_vec();
+
+    // fetch closure: error for any batch containing the failing pubkey (a genuine
+    // transient RelayError -> requeue_or_fail), else serve the scripted union.
+    let fetch = {
+        let graph = graph.clone();
+        let failing_pk = failing_pk.clone();
+        move |batch: Vec<ClaimedAuthor>| {
+            let graph = graph.clone();
+            let failing_pk = failing_pk.clone();
+            async move {
+                if batch.iter().any(|c| c.pubkey == failing_pk) {
+                    Err(RelayError::FetchTimeout("scripted transient failure".into()))
+                } else {
+                    Ok::<Vec<Event>, RelayError>(graph.union_for(&batch))
+                }
+            }
+        }
+    };
+
+    let anchor = common::keys(1).public_key().to_bytes().to_vec();
+    // max_attempts = 1 so the failing author hits the cap on its first failure and
+    // terminates `failed` in a single pass (the loop re-claims requeued rows).
+    run_crawl(
+        &pool,
+        &anchor,
+        1, // batch_size = 1 so the failing author is isolated in its own batch
+        4,
+        Kind::ContactList,
+        Timestamp::now(),
+        3600,
+        10_000,
+        1,
+        fetch,
+    )
+    .await?;
+
+    // Resolve the three terminal rows.
+    let fetched = id_of_seed(&pool, 2).await?.expect("seed 2 must be a row");
+    let not_found = id_of_seed(&pool, 8).await?.expect("seed 8 must be a row");
+
+    assert_eq!(status_of(&pool, fetched).await?, "fetched");
+    assert_eq!(status_of(&pool, not_found).await?, "not_found");
+    assert_eq!(status_of(&pool, failing).await?, "failed");
+
+    // FRESH-01: all three terminal rows have a non-NULL last_fetched_at.
+    for (label, id) in [("fetched", fetched), ("not_found", not_found), ("failed", failing)] {
+        let lfa: Option<chrono::DateTime<Utc>> =
+            sqlx::query_scalar::<_, Option<chrono::DateTime<Utc>>>(
+                "SELECT last_fetched_at FROM pubkeys WHERE id = $1",
+            )
+            .bind(id)
+            .fetch_one(&pool)
+            .await?;
+        assert!(
+            lfa.is_some(),
+            "FRESH-01: terminal {label} row must stamp last_fetched_at"
+        );
+    }
+
     Ok(())
 }

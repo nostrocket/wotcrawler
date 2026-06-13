@@ -57,3 +57,165 @@ pub const DEFAULT_CONCURRENCY: usize = 8;
 /// bounce `discovered <-> in_progress` forever (RESEARCH Pitfall 7). Default 3
 /// per D-09; the Phase 4 daemon sources the real value from config.
 pub const DEFAULT_MAX_ATTEMPTS: i16 = 3;
+
+use std::future::Future;
+use std::sync::Arc;
+
+use nostr_sdk::{Event, Kind, Timestamp};
+use sqlx::PgPool;
+use tokio::sync::Semaphore;
+
+use crate::crawl::apply::process_batch;
+use crate::crawl::frontier::{
+    claim_batch, reclaim_stale_on_startup, seed_anchor, ClaimedAuthor,
+};
+use crate::error::{RelayError, StoreError};
+
+/// Outcome of a crawl run: how many batches/authors were processed and how many
+/// orphaned `in_progress` leases were reclaimed at startup. Used for crawl
+/// bookkeeping and test assertions; the Phase 4 daemon turns these into metrics.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CrawlStats {
+    /// Orphaned `in_progress` leases reset to `discovered` at startup (D-06).
+    pub reclaimed_on_startup: u64,
+    /// Total authors claimed across all batches over the whole run.
+    pub authors_claimed: usize,
+    /// Total batches processed (one fan-out/ingest/apply cycle each).
+    pub batches_processed: usize,
+}
+
+/// Drive the BFS crawl from `anchor_pubkey` to component exhaustion with a
+/// bounded worker pool (CRAWL-01/02/03/04, FRESH-01).
+///
+/// Startup (CRAWL-03): [`seed_anchor`] roots the BFS at the single configurable
+/// anchor (D-03), then [`reclaim_stale_on_startup`] resets any orphaned
+/// `in_progress` lease left by a crash back to `discovered` (D-06) — no in-run
+/// reclaim sweep (deferred to Phase 4).
+///
+/// Loop (CRAWL-01/04): repeatedly [`claim_batch`] up to `batch_size` `discovered`
+/// authors; an EMPTY claim means the frontier is drained, so we join all in-flight
+/// workers and terminate (CRAWL-01 termination). Otherwise acquire one of
+/// `concurrency` [`Semaphore`] permits — this BLOCKS at the cap, which is the
+/// backpressure that bounds in-flight fetches to `concurrency × batch_size`
+/// authors (CRAWL-04); the "queue" is `pubkeys.status` in the DB, never an
+/// in-memory channel. Each permitted batch is spawned onto a worker that fans out,
+/// runs a single cross-relay ingest pass, and applies per-author
+/// ([`process_batch`]). Discovery of new followees happens inside `process_batch`
+/// (the `upsert_pubkey`-on-followee lands them `discovered`), so the next claim
+/// picks them up — that is the BFS frontier expanding (CRAWL-02 structural).
+///
+/// `fetch_union` is the injected raw-event source: given an owned batch it returns
+/// the RAW `Vec<Event>` union across all curated relays (production fans out per
+/// relay; tests inject a deterministic offline scripted graph). It is `Clone` so
+/// each spawned worker gets its own handle, and `Send + Sync + 'static` so it can
+/// cross the spawn boundary. There is NO status/reach-ability filter predicate
+/// and NO recursive CTE anywhere — discovery is purely structural (Pitfall 4).
+///
+/// `now` / `future_clamp_secs` / `follow_cap` / `max_attempts` are passed straight
+/// through to [`process_batch`].
+#[allow(clippy::too_many_arguments)]
+pub async fn run_crawl<F, Fut>(
+    pool: &PgPool,
+    anchor_pubkey: &[u8],
+    batch_size: i64,
+    concurrency: usize,
+    want_kind: Kind,
+    now: Timestamp,
+    future_clamp_secs: u64,
+    follow_cap: usize,
+    max_attempts: i16,
+    fetch_union: F,
+) -> Result<CrawlStats, StoreError>
+where
+    F: Fn(Vec<ClaimedAuthor>) -> Fut + Clone + Send + Sync + 'static,
+    Fut: Future<Output = Result<Vec<Event>, RelayError>> + Send + 'static,
+{
+    // Startup: seed the anchor (D-03) then reclaim crash orphans (D-06).
+    seed_anchor(pool, anchor_pubkey).await?;
+    let reclaimed = reclaim_stale_on_startup(pool).await?;
+
+    let mut stats = CrawlStats {
+        reclaimed_on_startup: reclaimed,
+        ..Default::default()
+    };
+
+    let sem = Arc::new(Semaphore::new(concurrency));
+    let mut workers: Vec<tokio::task::JoinHandle<Result<(), StoreError>>> = Vec::new();
+
+    loop {
+        let batch = claim_batch(pool, batch_size).await?;
+        if batch.is_empty() {
+            // The frontier is drained for now. New `discovered` rows are only
+            // created by in-flight workers' followee upserts, so once those join
+            // we re-check: a second empty claim after the join means real
+            // exhaustion (CRAWL-01 termination).
+            if workers.is_empty() {
+                break;
+            }
+            // Join all in-flight workers, surfacing the first error, then loop to
+            // re-claim any followees they just discovered.
+            for handle in workers.drain(..) {
+                join_worker(handle).await?;
+            }
+            continue;
+        }
+
+        stats.authors_claimed += batch.len();
+        stats.batches_processed += 1;
+
+        // Acquire a permit BEFORE spawning — this blocks at the cap, so at most
+        // `concurrency` batches are ever in flight (CRAWL-04 backpressure).
+        let permit = Arc::clone(&sem)
+            .acquire_owned()
+            .await
+            .expect("crawl semaphore is never closed");
+
+        let pool = pool.clone();
+        let fetch_union = fetch_union.clone();
+        let handle = tokio::spawn(async move {
+            // Hold the permit for the whole batch; dropping it on completion frees
+            // a slot for the next claim.
+            let _permit = permit;
+            let fut = fetch_union(batch.clone());
+            process_batch(
+                &pool,
+                &batch,
+                want_kind,
+                now,
+                future_clamp_secs,
+                follow_cap,
+                max_attempts,
+                || fut,
+            )
+            .await
+            .map(|_applied| ())
+        });
+        workers.push(handle);
+
+        // Opportunistically reap finished workers so `workers` does not grow
+        // without bound across many claim iterations (the permit cap bounds
+        // *concurrency*; this bounds the join-handle vector).
+        workers.retain(|h| !h.is_finished());
+    }
+
+    Ok(stats)
+}
+
+/// Join one spawned worker, flattening the JoinError (panic/cancel) and the
+/// inner `StoreError` into a single `StoreError`. A worker panic is surfaced as a
+/// store error rather than silently swallowed.
+async fn join_worker(
+    handle: tokio::task::JoinHandle<Result<(), StoreError>>,
+) -> Result<(), StoreError> {
+    match handle.await {
+        Ok(inner) => inner,
+        Err(join_err) => {
+            // A panicked/cancelled worker is a genuine failure; wrap it as a
+            // sqlx protocol error so it propagates through the StoreError boundary
+            // without inventing a new crawl-error enum for a should-not-happen case.
+            Err(StoreError::Sqlx(sqlx::Error::Protocol(format!(
+                "crawl worker task failed: {join_err}"
+            ))))
+        }
+    }
+}
