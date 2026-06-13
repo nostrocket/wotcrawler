@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Schema & Data Contract** - PostgreSQL graph schema, sqlx store layer, versioned migrations, documented public contract (completed 2026-06-12)
 - [x] **Phase 2: Relay Acquisition & Validation** - Curated relay pool with backoff/NIP-11 awareness feeding a signature-verifying, replaceable-event-resolving validator (verification passed 9/9 + live-relay UAT passed 2026-06-13, see 02-VERIFICATION.md) (completed 2026-06-13)
-- [ ] **Phase 3: Graph Writer & BFS Frontier** - Transactional edge-diff writer and DB-resident reachability-gated BFS frontier that survives restarts
+- [x] **Phase 3: Graph Writer & BFS Frontier** - Transactional edge-diff writer and DB-resident reachability-gated BFS frontier that survives restarts (completed 2026-06-13)
 - [ ] **Phase 4: Daemon, Staleness Loop & Observability** - One long-running daemon with TTL-driven refresh and the metrics/logging/health surface an operator trusts unattended
 - [ ] **Phase 5: NIP-65 Outbox Routing & Relay Health** - kind:10002 routing-table fallback for missed pubkeys plus per-relay health scoring driving routing and concurrency
 
@@ -118,7 +118,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-  - [ ] 03-03-PLAN.md — apply_validated seam + fan-out/union/single-ingest + bounded worker-pool crawl loop; GRAPH-02 edge-diff verification through the seam + CRAWL-01/02/03/04 + FRESH-01 full verification over the offline mock relay (GRAPH-02, CRAWL-01, CRAWL-02, CRAWL-04, FRESH-01)
+  - [x] 03-03-PLAN.md — apply_validated seam + fan-out/union/single-ingest + bounded worker-pool crawl loop; GRAPH-02 edge-diff verification through the seam + CRAWL-01/02/03/04 + FRESH-01 full verification over the offline mock relay (GRAPH-02, CRAWL-01, CRAWL-02, CRAWL-04, FRESH-01)
 
 ### Phase 4: Daemon, Staleness Loop & Observability
 
@@ -153,6 +153,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. Schema & Data Contract | 3/3 | Complete   | 2026-06-12 |
 | 2. Relay Acquisition & Validation | 12/12 | Complete    | 2026-06-13 |
-| 3. Graph Writer & BFS Frontier | 1/3 | In Progress|  |
+| 3. Graph Writer & BFS Frontier | 3/3 | Complete   | 2026-06-13 |
 | 4. Daemon, Staleness Loop & Observability | 0/TBD | Not started | - |
 | 5. NIP-65 Outbox Routing & Relay Health | 0/TBD | Not started | - |

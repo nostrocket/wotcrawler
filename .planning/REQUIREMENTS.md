@@ -33,10 +33,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Crawl & Frontier
 
-- [ ] **CRAWL-01**: Crawl starts from a single configurable anchor pubkey and discovers pubkeys via BFS over follow edges
-- [ ] **CRAWL-02**: Only pubkeys followed by someone already in the graph are ever enqueued — spam islands nobody legitimate points to are never crawled
+- [x] **CRAWL-01**: Crawl starts from a single configurable anchor pubkey and discovers pubkeys via BFS over follow edges
+- [x] **CRAWL-02**: Only pubkeys followed by someone already in the graph are ever enqueued — spam islands nobody legitimate points to are never crawled
 - [x] **CRAWL-03**: The frontier is DB-resident; after crash or restart the crawler resumes without refetching completed work
-- [ ] **CRAWL-04**: In-flight fetch concurrency is bounded end-to-end (backpressure; no unbounded queues or memory growth)
+- [x] **CRAWL-04**: In-flight fetch concurrency is bounded end-to-end (backpressure; no unbounded queues or memory growth)
 
 ### Refresh
 
@@ -104,10 +104,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GRAPH-02 | Phase 3 | Complete |
 | GRAPH-03 | Phase 1 | Complete |
 | GRAPH-04 | Phase 1 | Complete |
-| CRAWL-01 | Phase 3 | Pending |
-| CRAWL-02 | Phase 3 | Pending |
+| CRAWL-01 | Phase 3 | Complete |
+| CRAWL-02 | Phase 3 | Complete |
 | CRAWL-03 | Phase 3 | Complete |
-| CRAWL-04 | Phase 3 | Pending |
+| CRAWL-04 | Phase 3 | Complete |
 | FRESH-01 | Phase 3 | Complete |
 | FRESH-02 | Phase 4 | Pending |
 | FRESH-03 | Phase 4 | Pending |
