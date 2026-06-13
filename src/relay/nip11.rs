@@ -67,6 +67,16 @@ pub const DEFAULT_MAX_SUBSCRIPTIONS: usize = 20;
 /// stays well under any real relay's filter cap.
 pub const DEFAULT_MAX_FILTERS: usize = 10;
 
+/// Upper bound on an advertised `max_limit` (WR-02, T-02-13, Pitfall 1).
+///
+/// A relay's advertised `max_limit` is clamped down to this ceiling. Real relays
+/// cap REQ results in the low hundreds to low thousands; 5000 is comfortably
+/// above any honest cap (and 10x [`DEFAULT_MAX_LIMIT`]) while small enough that a
+/// hostile relay advertising e.g. `2_000_000_000` cannot produce a per-window cap
+/// so large that the count-vs-cap pagination loop treats a single EOSE window as
+/// complete (Pitfall 1) and stops paging early.
+pub const MAX_ADVERTISED_LIMIT: usize = 5000;
+
 /// Per-relay NIP-11 limits the pagination planner consumes.
 ///
 /// Populated from the relay's `limitation` block; any field a relay omits — or
@@ -107,6 +117,20 @@ fn clamp_limit(advertised: Option<i32>, default: usize) -> usize {
     }
 }
 
+/// Clamp an advertised `max_limit` to a usable `usize`, defaulting on absence or
+/// a non-positive value, and upper-bounding any honest-but-absurd value at
+/// [`MAX_ADVERTISED_LIMIT`] (WR-02, T-02-13).
+///
+/// Unlike [`clamp_limit`], the result is additionally capped at
+/// [`MAX_ADVERTISED_LIMIT`] so a relay advertising e.g. `2_000_000_000` cannot
+/// produce a pagination cap large enough to defeat count-vs-cap completeness
+/// (Pitfall 1). Only `max_limit` carries this upper bound — `max_subscriptions`
+/// and `max_filters` keep their existing default-on-non-positive behavior because
+/// they gate the crawler's own request shaping, not relay completeness.
+fn clamp_max_limit(advertised: Option<i32>) -> usize {
+    clamp_limit(advertised, DEFAULT_MAX_LIMIT).min(MAX_ADVERTISED_LIMIT)
+}
+
 /// Read [`RelayLimits`] out of a parsed [`RelayInformationDocument`].
 ///
 /// Pure: no I/O. A document with no `limitation` block yields all defaults; a
@@ -116,7 +140,7 @@ pub fn limits_from_doc(doc: &RelayInformationDocument) -> RelayLimits {
     match &doc.limitation {
         None => RelayLimits::defaults(),
         Some(lim) => RelayLimits {
-            max_limit: clamp_limit(lim.max_limit, DEFAULT_MAX_LIMIT),
+            max_limit: clamp_max_limit(lim.max_limit),
             max_subscriptions: clamp_limit(lim.max_subscriptions, DEFAULT_MAX_SUBSCRIPTIONS),
             max_filters: clamp_limit(lim.max_filters, DEFAULT_MAX_FILTERS),
         },
