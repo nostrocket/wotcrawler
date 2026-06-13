@@ -208,8 +208,8 @@ async fn capped_first_window_triggers_second_page() {
     );
     assert_eq!(
         second_until.as_secs(),
-        4_000 - 1,
-        "page-back until is the oldest event of window 1 minus one second"
+        4_000,
+        "page-back until is the oldest event of window 1 (inclusive, CR-03)"
     );
 }
 

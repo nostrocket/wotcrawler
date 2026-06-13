@@ -19,7 +19,7 @@
 //!
 //! Implemented in plan 02-03 Task 3.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::time::Duration;
 
@@ -29,6 +29,22 @@ use crate::error::RelayError;
 
 /// Default per-fetch deadline (Pitfall 9). Config-overridable later (OPS-01).
 pub const DEFAULT_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Hard per-author-chunk page budget (CR-04 / T-02-16).
+///
+/// The inclusive boundary page-back (CR-03) plus the cross-window dedup make a
+/// well-behaved relay terminate via the zero-new-id guard. But an adversarial
+/// relay can ignore `until` and return a full-cap window of *new* ids forever,
+/// driving an unbounded loop with unbounded `out` growth. This budget caps the
+/// number of windows paged per author chunk: when reached, `paginate_chunk`
+/// errors so the caller requeues rather than looping or exhausting memory.
+///
+/// Sized generously: against the relay `max_limit` cap (≤ DEFAULT_MAX_LIMIT =
+/// 500 in [`super::nip11`]), the absolute worst-case `out` for one chunk before
+/// the error fires is `MAX_PAGES_PER_CHUNK * cap` ≈ 5M events — far above any
+/// legitimate per-author follow-list history, so this never truncates honest
+/// pagination, yet bounds a hostile relay to a finite, recoverable failure.
+pub const MAX_PAGES_PER_CHUNK: usize = 10_000;
 
 /// The page-back decision for a single window (RELAY-03 / Pitfall 1).
 ///
@@ -41,9 +57,14 @@ pub const DEFAULT_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 /// Returns `Some(next_until)` to page again, `None` to stop this author chunk.
 pub fn page_back(returned: usize, cap: usize, oldest: Option<Timestamp>) -> Option<Timestamp> {
     match (returned >= cap, oldest) {
-        // Capped window: there may be more older events. Page back one second
-        // before the oldest event so the next window does not re-include it.
-        (true, Some(ts)) => Some(Timestamp::from_secs(ts.as_secs().saturating_sub(1))),
+        // Capped window: there may be more older events. Page back INCLUSIVELY
+        // to the oldest event's second (CR-03). An exclusive `oldest - 1` would
+        // skip any sibling event sharing that same second that the relay's cap
+        // cut off, opening a permanent hole at the boundary second. Returning
+        // `oldest` re-requests that second; `paginate_chunk` dedups the already-
+        // seen oldest event by id and its zero-new-id guard stops the loop when
+        // the boundary re-request yields nothing genuinely new.
+        (true, Some(ts)) => Some(ts),
         // Fewer than the cap (or no events): the window is complete.
         _ => None,
     }
@@ -66,17 +87,49 @@ where
     Fut: Future<Output = Result<Vec<Event>, RelayError>>,
 {
     let mut out: Vec<Event> = Vec::new();
+    // Cross-window seen-set (CR-03/CR-04): the inclusive boundary page-back
+    // re-serves the oldest event of the prior window, and a relay may echo the
+    // same id across windows. Dedup by id so the union holds each event once,
+    // and use the count of NEWLY-seen ids as the page-progress signal.
+    let mut seen: HashSet<EventId> = HashSet::new();
     let mut until = Timestamp::now();
+    let mut pages: usize = 0;
     loop {
+        // Hard page budget (CR-04 / T-02-16): a relay ignoring `until` and
+        // returning full-cap windows of new ids would otherwise loop forever and
+        // grow `out` without bound. Error out so the caller requeues.
+        if pages >= MAX_PAGES_PER_CHUNK {
+            return Err(RelayError::FetchTimeout(format!(
+                "page budget ({MAX_PAGES_PER_CHUNK}) exceeded for author chunk"
+            )));
+        }
         let filter = Filter::new()
             .authors(authors.iter().copied())
             .kind(kind)
             .limit(cap)
             .until(until);
         let events = fetch(filter).await?;
+        pages += 1;
         let returned = events.len();
         let oldest = events.iter().map(|e| e.created_at).min();
-        out.extend(events);
+
+        // Keep only ids not yet seen across all prior windows; the NEW-id count
+        // drives progress, not the raw returned count.
+        let mut new_ids = 0usize;
+        for ev in events {
+            if seen.insert(ev.id) {
+                out.push(ev);
+                new_ids += 1;
+            }
+        }
+
+        // Zero new ids means the (possibly capped) boundary re-request returned
+        // only already-seen events — genuine exhaustion. Stop even when
+        // `returned >= cap`, so a relay echoing a full duplicate window cannot
+        // keep the loop alive (CR-04).
+        if new_ids == 0 {
+            break;
+        }
         match page_back(returned, cap, oldest) {
             Some(next) => until = next,
             None => break,
