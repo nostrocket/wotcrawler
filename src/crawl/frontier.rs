@@ -128,9 +128,12 @@ pub async fn requeue_or_fail(
     now: DateTime<Utc>,
 ) -> Result<(), StoreError> {
     // Single atomic UPDATE: bump the counter, then branch on the BUMPED value.
-    // `failed` routes through last_fetched_at so FRESH-01 holds; a requeue clears
-    // claimed_at (the lease is released) and leaves last_fetched_at untouched
-    // (the knowledge was not refreshed — only retried).
+    // `failed` routes through last_fetched_at so FRESH-01 holds; a requeue leaves
+    // last_fetched_at untouched (the knowledge was not refreshed — only retried).
+    // Either way the lease is released (`claimed_at = NULL`): both the requeue
+    // (`discovered`) and the terminal (`failed`) row are no longer leased to any
+    // worker, so a non-NULL claimed_at on either would be semantically wrong and
+    // would poison `claimed_at IS NOT NULL` in-flight monitoring (WR-01).
     sqlx::query!(
         // `$2` is cast to int2 so the i16 bind matches the SMALLINT column domain
         // (fetch_attempts + 1 alone promotes to int4, which would force an i32 bind).
@@ -144,10 +147,7 @@ pub async fn requeue_or_fail(
                  WHEN fetch_attempts + 1 >= $2::int2 THEN $3 \
                  ELSE last_fetched_at \
              END, \
-             claimed_at = CASE \
-                 WHEN fetch_attempts + 1 >= $2::int2 THEN claimed_at \
-                 ELSE NULL \
-             END \
+             claimed_at = NULL \
          WHERE id = $1",
         id,
         max_attempts,
