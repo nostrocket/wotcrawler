@@ -154,6 +154,60 @@ async fn production_cap_comes_from_limit_cache() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Two pooled relays sharing ONE registry must mint TWO independent limiter
+/// keys, one per individual relay url — not a single key on a joined pool
+/// string (WR-03 residual, 02-VERIFICATION.md gap #2; threat T-02-10/T-02-17).
+///
+/// This is the regression guard for the threading fix: the production fetch path
+/// must key the per-relay GCRA limiter on each relay's own url. Driving the gated
+/// seam (`paginate_chunk_gated`, the seam `fetch_complete_with_timeout` delegates
+/// to) once per relay url over its own scripted window must leave the shared
+/// registry holding exactly two keys. Had the production path keyed on a joined
+/// pool string, a single combined key would yield `active_relay_count() == 1`.
+#[tokio::test]
+async fn two_pooled_relays_get_independent_limiter_keys() -> anyhow::Result<()> {
+    let cap = 4usize;
+    let author = common::keys(10).public_key();
+    let now = Timestamp::now();
+
+    // One short (< cap) window per relay so each pages exactly once and stops.
+    let make_window = || -> Vec<Event> {
+        vec![common::signed_event(
+            &common::keys(10),
+            Kind::ContactList,
+            now,
+            &[common::keys(11).public_key()],
+        )]
+    };
+
+    // One shared registry across both pooled relays — the production scenario.
+    let registry = RateLimiterRegistry::new();
+    let r1_url = "wss://r1.example";
+    let r2_url = "wss://r2.example";
+
+    let relay1 = mock_relay::ScriptedRelay::new(vec![make_window()]);
+    let mut fetch1 = relay1.fetch_fn();
+    paginate_chunk_gated(&[author], Kind::ContactList, cap, &registry, r1_url, &mut fetch1).await?;
+
+    let relay2 = mock_relay::ScriptedRelay::new(vec![make_window()]);
+    let mut fetch2 = relay2.fetch_fn();
+    paginate_chunk_gated(&[author], Kind::ContactList, cap, &registry, r2_url, &mut fetch2).await?;
+
+    // Two distinct relays => two independent limiter keys (real per-relay quota).
+    assert_eq!(
+        registry.active_relay_count(),
+        2,
+        "each pooled relay must mint its OWN limiter key (not one joined-pool-string key)"
+    );
+    assert!(registry.has_limiter(r1_url), "r1's individual url must be a limiter key");
+    assert!(registry.has_limiter(r2_url), "r2's individual url must be a limiter key");
+    assert!(
+        !registry.has_limiter("wss://r1.example, wss://r2.example"),
+        "a joined pool-string key must NOT exist — that was the WR-03 residual bug"
+    );
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Task 2: the notifications consumer's per-message handler routes rate-limited /
 // blocked relay messages into record_notice()/backoff().

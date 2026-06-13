@@ -243,6 +243,25 @@ impl RateLimiterRegistry {
             .copied()
             .unwrap_or(0)
     }
+
+    /// Number of distinct relay keys with a live GCRA limiter (test/observability
+    /// introspection). One key per relay url proves per-relay throttling is real:
+    /// keying on a joined pool string would collapse N relays into a single key
+    /// (WR-03 residual / T-02-10), so a test asserts two pooled relays yield two
+    /// keys here, not one.
+    pub fn active_relay_count(&self) -> usize {
+        self.limiters.lock().expect("rate-limiter map not poisoned").len()
+    }
+
+    /// Whether a limiter exists for exactly this relay url (test/observability
+    /// introspection). Lets a test assert each individual relay url is a key while
+    /// a joined-pool-string key is absent.
+    pub fn has_limiter(&self, relay_url: &str) -> bool {
+        self.limiters
+            .lock()
+            .expect("rate-limiter map not poisoned")
+            .contains_key(relay_url)
+    }
 }
 
 impl Default for RateLimiterRegistry {
