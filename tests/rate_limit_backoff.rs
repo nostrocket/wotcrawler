@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use web_of_trust::relay::rate_limit::{
-    classify_notice, NoticeKind, RateLimiterRegistry,
+    backoff_delay_unjittered, classify_notice, NoticeKind, RateLimiterRegistry,
 };
 
 #[test]
@@ -68,6 +68,46 @@ fn backoff_is_independent_per_relay() {
     reg.record_notice("wss://b.example", "rate-limited: x");
     assert_eq!(reg.failure_count("wss://a.example"), 2);
     assert_eq!(reg.failure_count("wss://b.example"), 1);
+}
+
+#[test]
+fn backoff_saturates_at_cap_for_high_failure_counts() {
+    // WR-01: at base=1s the unjittered factor is base_nanos (~2^30) << failures.
+    // With a u128 checked_shl, shift counts in 119..=127 push the set bits past
+    // bit 127, truncating the product to 0 and returning a ZERO delay — the
+    // opposite of saturation (a zero-delay retry storm, threat T-02-20).
+    // Saturating at failures >= 64 closes the entire window.
+    let base = Duration::from_secs(1);
+    let cap = Duration::from_secs(300);
+
+    // Explicit point inside the old truncation window.
+    assert_eq!(
+        backoff_delay_unjittered(120, base, cap),
+        cap,
+        "failures=120 must saturate at cap, not truncate to zero"
+    );
+
+    // Sweep the whole high-failure range: never zero, never above cap.
+    for failures in 64..=127u32 {
+        let d = backoff_delay_unjittered(failures, base, cap);
+        assert!(
+            d != Duration::ZERO,
+            "backoff at failures={failures} must never be zero (retry-storm guard)"
+        );
+        assert!(
+            d <= cap,
+            "backoff at failures={failures} must never exceed cap ({d:?} > {cap:?})"
+        );
+        assert_eq!(d, cap, "high failure counts must saturate at cap (failures={failures})");
+    }
+
+    // Low counts still grow exponentially (monotonic up to cap) and are non-zero.
+    let d0 = backoff_delay_unjittered(0, base, cap);
+    let d1 = backoff_delay_unjittered(1, base, cap);
+    let d2 = backoff_delay_unjittered(2, base, cap);
+    assert_eq!(d0, base);
+    assert_eq!(d1, base * 2);
+    assert_eq!(d2, base * 4);
 }
 
 #[tokio::test]
