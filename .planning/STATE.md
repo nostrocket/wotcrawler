@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 02-05-PLAN.md - fetch BLOCKERs CR-01 to CR-04 closed
-last_updated: "2026-06-13T06:55:33.431Z"
+last_updated: "2026-06-13T07:01:24.427Z"
 last_activity: 2026-06-13 -- Phase 02 execution started
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 12
-  completed_plans: 10
+  completed_plans: 11
   percent: 20
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 ## Current Position
 
 Phase: 02 (relay-acquisition-validation) — EXECUTING
-Plan: 4 of 9
+Plan: 5 of 9
 Status: Ready to execute
 Last activity: 2026-06-13 -- Phase 02 execution started
 
@@ -62,6 +62,8 @@ Progress: [█████░░░░░] 50%
 | Phase 02 P05 | 8 | 2 tasks | 3 files |
 | Phase 02 P06 | 1 | 1 tasks | 3 files |
 | Phase 02 P07 | 3 | - tasks | - files |
+| Phase 02 P08 | 3 | - tasks | - files |
+| Phase 02 P08 | 3 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -85,6 +87,7 @@ Recent decisions affecting current work:
 - [Phase ?]: 02-05 Fetch completeness and safety BLOCKERs closed: page_back now INCLUSIVE (CR-03); paginate_chunk dedups cross-window, stops on zero new ids, and enforces MAX_PAGES_PER_CHUNK=10000 budget (CR-04); fetch_window_with_deadline constructs RelayError::FetchTimeout on elapsed greater-or-equal timeout because the SDK returns a partial Ok (CR-02); pre-verify dedup_by_id removed so dedup follows verify::accept to defeat id-squat (CR-01 fetch half).
 - [Phase 02-06]: CR-01 closed: ingest_events now verifies before dedup so only verified event ids enter the cross-relay seen-set; a forged id-squat copy (T-02-14) can no longer consume a genuine id and suppress the honest follow list. Genuine dedup preserved.
 - [Phase ?]: [02-07] NIP-11 fetch hardened (CR-06/WR-02): shared LazyLock reqwest client with 10s request + 5s connect timeout (T-02-18); MAX_NIP11_BYTES=64KiB stream-and-bail body bound (T-02-19); MAX_ADVERTISED_LIMIT=5000 upper-clamp on advertised max_limit so an absurd value cannot defeat count-vs-cap pagination (T-02-13, Pitfall 1).
+- [Phase ?]: [02-08] Rate limiter correctness: shared Arc<DirectLimiter> per relay so concurrent acquire() obeys one GCRA quota (CR-05/T-02-10); backoff saturates at failures >= 64 closing the u128 checked_shl zero-delay window at 119..=127 (WR-01/T-02-20). Production wiring is 02-09.
 
 ### Pending Todos
 
@@ -105,6 +108,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-13T06:55:21.981Z
+Last session: 2026-06-13T07:01:24.424Z
 Stopped at: Completed 02-05-PLAN.md - fetch BLOCKERs CR-01 to CR-04 closed
 Resume file: None
