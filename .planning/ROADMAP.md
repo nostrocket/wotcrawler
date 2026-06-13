@@ -58,7 +58,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. For each pubkey only the newest valid kind-3 (and kind:10002) is applied — future-dated created_at beyond the configurable clamp is rejected and same-timestamp ties break to the lowest event id.
   5. Malformed p-tags are skipped and oversized follow lists are bounded by a configurable cap without crashing the pipeline; per-relay rate limiting keeps request rates polite and rate-limit notices trigger backoff.
 
-**Plans**: 9 plans (4 original + 5 gap-closure from 02-VERIFICATION.md)
+**Plans**: 11 plans (4 original + 5 gap-closure from 02-VERIFICATION.md + 2 re-verification gap-closure)
 
 **Wave 1**
 
@@ -83,6 +83,11 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Gap-Closure Wave 2** *(blocked on 02-05/02-07/02-08; wires the corrected mechanisms into production)*
 
   - [x] 02-09-PLAN.md — production-path wiring: gate fetch_events behind acquire(), source max_limit from LimitCache, spawn notifications consumer for record_notice/backoff (WR-03) [RELAY-02, RELAY-04]
+
+**Gap-Closure Wave 3** *(from 02-VERIFICATION.md re-verification; 02-10 then 02-11 — both edit src/relay/fetch.rs so they run sequentially, not in parallel)*
+
+  - [ ] 02-10-PLAN.md — fetch.rs paginate_chunk prev_until stall detection: a deterministic relay re-serving the same cap-sized prefix for a pinned until=T with more events at the boundary second surfaces an Err (requeue) instead of silent truncation (CR-03 residual) [RELAY-03]
+  - [ ] 02-11-PLAN.md — fetch.rs thread the per-relay relay_url through fetch_complete/fetch_complete_with_timeout as the GCRA limiter key (pool_label demoted to diagnostics); two pooled relays get two independent limiter keys (WR-03 residual) [RELAY-04]
 
 ### Phase 3: Graph Writer & BFS Frontier
 
