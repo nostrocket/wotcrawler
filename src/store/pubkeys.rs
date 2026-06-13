@@ -57,6 +57,17 @@ pub async fn set_fetch_status(
     status: &str,
     ts: DateTime<Utc>,
 ) -> Result<(), StoreError> {
+    // Guard the allowed status domain at the store boundary (WR-03). The DB CHECK
+    // constraint is the runtime backstop, but a typo or an out-of-domain value
+    // (e.g. `in_progress`, which would bypass the lease mechanism) should fail
+    // loudly in development rather than surface as a confusing `StoreError::Sqlx`.
+    // Kept as a `debug_assert!` so the `&str` signature does not ripple into a new
+    // public enum across every caller.
+    debug_assert!(
+        ["discovered", "fetched", "not_found", "failed"].contains(&status),
+        "set_fetch_status called with invalid domain value: {status}"
+    );
+
     sqlx::query!(
         "UPDATE pubkeys SET status = $2, last_fetched_at = $3 WHERE id = $1",
         id,
