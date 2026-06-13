@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 02-05-PLAN.md - fetch BLOCKERs CR-01 to CR-04 closed
+status: ready
+stopped_at: Phase 02 complete (verification + UAT passed), ready to plan Phase 3
 last_updated: "2026-06-13T12:47:08.868Z"
 last_activity: 2026-06-13
 progress:
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-11)
 
 **Core value:** From one anchor pubkey, maintain a complete and continuously fresh follow graph of everyone reachable through follows — fetched efficiently — so a downstream trust/spam layer can read it from a shared database at any time.
-**Current focus:** Phase 02 — relay-acquisition-validation
+**Current focus:** Phase 3 — Graph Writer & BFS Frontier
 
 ## Current Position
 
 Phase: 3
 Plan: Not started
-Status: Ready to execute
+Status: Ready to plan
 Last activity: 2026-06-13
 
-Progress: [█████░░░░░] 50%
+Progress: [████░░░░░░] 40% (2/5 phases)
 
 ## Performance Metrics
 
