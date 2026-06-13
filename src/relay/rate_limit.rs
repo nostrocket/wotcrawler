@@ -102,8 +102,17 @@ pub fn backoff_delay_unjittered(failures: u32, base: Duration, cap: Duration) ->
     // ~63, or any overflow, lands well past the cap and is clamped to it — we
     // must NOT truncate the factor (a u64->u32 cast at failures>=32 wrapped to
     // a tiny value and produced a near-zero delay; that was the saturation bug).
+    //
+    // Saturate early at failures >= 64. A u128 left-shift of a ns base whose set
+    // bits start near bit 30 (1s ≈ 2^30 ns) pushes those bits past bit 127 once
+    // the shift count climbs into 119..=127, so `checked_shl` returns Some with
+    // the high bits truncated away — i.e. 0, the opposite of saturation (a
+    // zero-delay retry storm, WR-01 / T-02-20). Any 2^64-ns factor already
+    // dwarfs every reasonable cap, so clamping to cap at 64 is correct and
+    // avoids the entire truncation window without relying on the base's bit
+    // position.
     let cap_nanos = cap.as_nanos();
-    if failures >= 128 {
+    if failures >= 64 {
         return cap;
     }
     let base_nanos = base.as_nanos();
