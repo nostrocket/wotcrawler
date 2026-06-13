@@ -114,7 +114,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-  - [ ] 03-02-PLAN.md — Frontier queue module: seed_anchor, claim_batch (FOR UPDATE SKIP LOCKED short-txn lease), reclaim_stale_on_startup, requeue_or_fail; crawl module + lib.rs registration; claim/lease/reclaim/terminal-stamp tests (CRAWL-01, CRAWL-02, CRAWL-03, FRESH-01)
+  - [x] 03-02-PLAN.md — Frontier queue module: seed_anchor, claim_batch (FOR UPDATE SKIP LOCKED short-txn lease), reclaim_stale_on_startup, requeue_or_fail; crawl module + lib.rs registration; claim/lease/reclaim/terminal-stamp tests (CRAWL-01, CRAWL-02, CRAWL-03, FRESH-01)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 

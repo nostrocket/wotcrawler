@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 3 context gathered
-last_updated: "2026-06-13T14:05:43.747Z"
-last_activity: 2026-06-13 -- Phase 03 execution started
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-06-13T14:15:30Z"
+last_activity: 2026-06-13 -- 03-02 frontier queue primitives shipped
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 18
-  completed_plans: 16
+  completed_plans: 17
   percent: 40
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 ## Current Position
 
 Phase: 03 (graph-writer-bfs-frontier) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
-Last activity: 2026-06-13 -- Phase 03 execution started
+Last activity: 2026-06-13 -- 03-02 frontier queue primitives shipped
 
 Progress: [████░░░░░░] 40% (2/5 phases)
 
@@ -69,6 +69,7 @@ Progress: [████░░░░░░] 40% (2/5 phases)
 | Phase 02 P11 | 6 | 2 tasks | 4 files |
 | Phase 02 P12 | 3m | 2 tasks | 2 files |
 | Phase 03 P01 | 13 | 4 tasks | 4 files |
+| Phase 03 P02 | 9 | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -97,6 +98,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 2]: [02-10] BLOCKER 1 closed (CR-03 residual / RELAY-03): paginate_chunk tracks prev_until across iterations; a repeated pinned until=T that stays capped with zero new ids returns Err(FetchTimeout) so the caller requeues rather than silently completing a truncated follow list. Genuine exhaustion (short window, or first page-back into the boundary second) still breaks Ok. Reused FetchTimeout (no new variant). Deterministic-relay test (prefix_for_until_fetch_fn) proves it RED then GREEN.
 - [Phase ?]: [02-11] WR-03 residual / RELAY-04 closed: per-relay GCRA limiter keyed on the caller's individual relay_url threaded through fetch_complete/fetch_complete_with_timeout; pool_label demoted to diagnostics, never the acquire() key. Two pooled relays now mint two independent limiter keys; GCRA state survives pool churn.
 - [Phase ?]: [Phase 3]: [03-01] Frontier migration 0002 shipped: widened pubkeys.status CHECK to include transient in_progress lease state (named pubkeys_status_check, verified via pg_constraint), added internal claimed_at + fetch_attempts columns, redefined pubkey_freshness to collapse in_progress->discovered so the public contract domain stays 4-valued. Wave 0 scaffolds tests/graph_writer.rs (GRAPH-02) and tests/frontier.rs (CRAWL-01..04, FRESH-01) created as named ignored stubs. No .sqlx drift.
+- [Phase 3]: [03-02] Frontier queue primitives shipped (CRAWL-01/02/03, FRESH-01): src/crawl module registered; frontier::seed_anchor (D-03, verbatim upsert_pubkey), claim_batch (FOR UPDATE SKIP LOCKED CTE in its own short txn so the lock releases before the fetch, D-04/D-07), reclaim_stale_on_startup (in_progress->discovered sweep, D-06), requeue_or_fail (single atomic UPDATE bumping fetch_attempts and branching on the post-increment value — requeue under cap, terminal failed + last_fetched_at stamp at cap, D-09/D-11). ClaimedAuthor{id,pubkey}; documented DEFAULT_BATCH_SIZE/CONCURRENCY/MAX_ATTEMPTS. 7 frontier-module integration tests green; 4 end-to-end crawl-loop tests kept ignored for 03-03. .sqlx regenerated for the 3 new queries; offline build green. No new error enum (StoreError reused); $2::int2 cast keeps the i16 max_attempts bind aligned with the SMALLINT column.
 
 ### Pending Todos
 
@@ -117,6 +119,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-13T14:05:08.261Z
-Stopped at: Phase 3 context gathered
-Resume file: .planning/phases/03-graph-writer-bfs-frontier/03-CONTEXT.md
+Last session: 2026-06-13T14:15:30Z
+Stopped at: Completed 03-02-PLAN.md
+Resume file: None
