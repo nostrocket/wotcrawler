@@ -26,6 +26,7 @@ use std::time::{Duration, Instant};
 use nostr_sdk::{Client, Event, EventId, Filter, Kind, PublicKey, Timestamp};
 
 use crate::error::RelayError;
+use crate::relay::rate_limit::RateLimiterRegistry;
 
 /// Default per-fetch deadline (Pitfall 9). Config-overridable later (OPS-01).
 pub const DEFAULT_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -138,6 +139,49 @@ where
     Ok(out)
 }
 
+/// [`paginate_chunk`] with every window REQ gated behind the per-relay GCRA
+/// limiter (WR-03 / RELAY-04 — production wiring).
+///
+/// This is the production-and-testable seam the 02-VERIFICATION.md data-flow
+/// trace flagged DISCONNECTED: the rate limiter existed but no production caller
+/// reached [`RateLimiterRegistry::acquire`]. Here every window REQ first awaits
+/// `registry.acquire(relay_url)`, so the politeness gate (threat T-02-10)
+/// actually runs in production — not only in the limiter's own unit tests. The
+/// injected `fetch` is wrapped so the gate sits immediately before each REQ; the
+/// count-vs-cap page-back logic is unchanged ([`paginate_chunk`] still owns it).
+///
+/// `cap` is the effective per-window cap (the relay's cached NIP-11 `max_limit`
+/// from [`super::nip11::LimitCache`], sourced by the caller — see
+/// [`super::acquire_validated_lists_client`]).
+pub async fn paginate_chunk_gated<F, Fut>(
+    authors: &[PublicKey],
+    kind: Kind,
+    cap: usize,
+    registry: &RateLimiterRegistry,
+    relay_url: &str,
+    mut fetch: F,
+) -> Result<Vec<Event>, RelayError>
+where
+    F: FnMut(Filter) -> Fut,
+    Fut: Future<Output = Result<Vec<Event>, RelayError>>,
+{
+    paginate_chunk(authors, kind, cap, move |filter| {
+        // Gate BEFORE the REQ: await the per-relay token so every outbound
+        // window passes the GCRA quota. The limiter for `relay_url` is shared
+        // across all callers (CR-05), so concurrent chunks obey one quota.
+        //
+        // The future produced here re-borrows `fetch` for the duration of one
+        // window (paginate_chunk awaits it before the next call), so the
+        // `&mut fetch` cannot outlive the FnMut body across calls.
+        let fut = fetch(filter);
+        async move {
+            registry.acquire(relay_url).await?;
+            fut.await
+        }
+    })
+    .await
+}
+
 /// Run one window fetch under a deadline, converting a partial-`Ok` timeout into
 /// an explicit [`RelayError::FetchTimeout`] requeue signal (CR-02 / Pitfall 9).
 ///
@@ -188,12 +232,29 @@ pub async fn fetch_complete(
     kind: Kind,
     max_limit: usize,
     max_authors: usize,
+    registry: &RateLimiterRegistry,
 ) -> Result<Vec<Event>, RelayError> {
-    fetch_complete_with_timeout(client, authors, kind, max_limit, max_authors, DEFAULT_FETCH_TIMEOUT)
-        .await
+    fetch_complete_with_timeout(
+        client,
+        authors,
+        kind,
+        max_limit,
+        max_authors,
+        DEFAULT_FETCH_TIMEOUT,
+        registry,
+    )
+    .await
 }
 
 /// [`fetch_complete`] with an explicit per-fetch timeout (Pitfall 9).
+///
+/// `registry` gates every window REQ behind the per-relay GCRA limiter
+/// ([`paginate_chunk_gated`], WR-03 / RELAY-04): the politeness quota actually
+/// runs in production, not only in the limiter's unit tests. `max_limit` is the
+/// effective per-window cap — the caller ([`super::acquire_validated_lists_client`])
+/// sources it from the relay's NIP-11 [`super::nip11::LimitCache`] so the cap is
+/// the relay's real, bounded limit (WR-03 / RELAY-02 / threat T-02-13).
+#[allow(clippy::too_many_arguments)]
 pub async fn fetch_complete_with_timeout(
     client: &Client,
     authors: &[PublicKey],
@@ -201,17 +262,19 @@ pub async fn fetch_complete_with_timeout(
     max_limit: usize,
     max_authors: usize,
     timeout: Duration,
+    registry: &RateLimiterRegistry,
 ) -> Result<Vec<Event>, RelayError> {
     let cap = max_limit.max(1);
     let chunk_size = max_authors.max(1);
-    // Label for FetchTimeout: the connected pool's relay urls. A timeout is a
-    // pool-level requeue signal (the SDK fans the fetch across the pool); listing
-    // the connected relays gives the operator the actionable context without
-    // embedding secrets (T-02-01).
+    // Label for FetchTimeout AND the per-relay rate-limiter key: the connected
+    // pool's relay urls. A timeout is a pool-level requeue signal (the SDK fans
+    // the fetch across the pool); listing the connected relays gives the operator
+    // the actionable context without embedding secrets (T-02-01).
     let relay_url = pool_label(client).await;
     let mut all: Vec<Event> = Vec::new();
     for chunk in authors.chunks(chunk_size) {
-        let events = paginate_chunk(chunk, kind, cap, |filter| {
+        // Gate every window REQ behind the per-relay limiter (WR-03 / T-02-10).
+        let events = paginate_chunk_gated(chunk, kind, cap, registry, relay_url.as_str(), |filter| {
             let relay_url = relay_url.as_str();
             // Every fetch carries the deadline; a timed-out window is a requeue,
             // not completion (Pitfall 9). The SDK returns a partial Ok on
