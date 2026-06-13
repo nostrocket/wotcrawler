@@ -90,8 +90,10 @@ impl ValidatedFollowList {
 /// and emit one [`ValidatedFollowList`] per author whose newest valid event of
 /// `want_kind` survives.
 ///
-/// Pipeline: dedup by id (cross-relay [`HashSet<EventId>`] seen-set, INGEST-02)
-/// -> verify + kind/author gate ([`verify::accept`], INGEST-01) -> group by
+/// Pipeline: verify + kind/author gate ([`verify::accept`], INGEST-01)
+/// -> dedup by id (cross-relay [`HashSet<EventId>`] seen-set, INGEST-02; runs
+/// AFTER verify so only verified ids occupy the seen-set, CR-01/T-02-14)
+/// -> group by
 /// author -> resolve the replaceable winner per author ([`replaceable::pick_winner`],
 /// INGEST-03/05) -> extract and bound its followees
 /// ([`follow_list::followee_pubkeys`], INGEST-04) -> build the contract value.
@@ -126,11 +128,20 @@ pub fn ingest_events(
     let mut by_author: HashMap<PublicKey, Vec<Event>> = HashMap::new();
 
     for event in events {
-        if !seen.insert(event.id) {
-            continue; // duplicate id from another relay — already handled.
-        }
+        // SECURITY-CRITICAL ORDERING (CR-01 / T-02-14): dedup MUST follow
+        // verification, never precede it. Verify FIRST so only events with a
+        // recomputed-matching id + valid signature can reach the seen-set. A
+        // hostile relay can forge an event that claims a genuine event's id
+        // (id-squat); if dedup ran first, that forged id would enter the
+        // seen-set, the forgery would then fail verify, and the genuine copy
+        // arriving later would be skipped as a "duplicate" — inverting
+        // INGEST-02 into a censorship primitive. Gating insertion on
+        // `verify::accept` means a forged copy never consumes the id.
         if !verify::accept(&event, want_kind, requested) {
             continue; // forged or unsolicited — counted inside the gate.
+        }
+        if !seen.insert(event.id) {
+            continue; // genuine duplicate id (verified) — already handled.
         }
         by_author.entry(event.pubkey).or_default().push(event);
     }
