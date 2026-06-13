@@ -98,7 +98,12 @@ pub async fn claim_batch(pool: &PgPool, limit: i64) -> Result<Vec<ClaimedAuthor>
 /// an unchanged event id (D-05). Continuous in-run reclaim is deferred to Phase 4.
 pub async fn reclaim_stale_on_startup(pool: &PgPool) -> Result<u64, StoreError> {
     let result = sqlx::query!(
-        "UPDATE pubkeys SET status = 'discovered', claimed_at = NULL \
+        // Reset `fetch_attempts` too: a crash-orphaned row must not consume its
+        // retry budget. The counter is a *relay-failure* count; a process crash is
+        // not a relay failure, so a row merely in-flight at crash time would
+        // otherwise be one error away from a spurious terminal `failed` (WR-02).
+        // Re-fetching is harmless — apply_follow_list is idempotent (D-05).
+        "UPDATE pubkeys SET status = 'discovered', claimed_at = NULL, fetch_attempts = 0 \
          WHERE status = 'in_progress'"
     )
     .execute(pool)

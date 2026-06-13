@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE pubkeys SET status = 'discovered', claimed_at = NULL, fetch_attempts = 0 WHERE status = 'in_progress'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "e2486075856fe5d12b52c48fba766db9883fdaf05be6cddccfdf099557b59089"
+}
