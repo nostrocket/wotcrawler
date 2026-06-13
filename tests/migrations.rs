@@ -136,3 +136,76 @@ async fn schema_shape() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+/// Phase 3 (migration 0002): the widened status CHECK accepts the transient
+/// `in_progress` lease state, the `pubkey_freshness` contract view collapses
+/// `in_progress` back to `discovered`, and the new internal lease/retry columns
+/// (`claimed_at`, `fetch_attempts`) are absent from the public contract view
+/// (T-03-02). The `migrations_idempotent` test above already proves 0002 re-run
+/// is a no-op, so that assertion is not duplicated here.
+#[tokio::test]
+async fn migration_0002_widens_status_and_hides_in_progress() -> anyhow::Result<()> {
+    let (_container, url) = common::start_postgres().await?;
+    let pool = sqlx::PgPool::connect(&url).await?;
+    sqlx::migrate!("./migrations").run(&pool).await?;
+
+    // Seed a row via a parameterized insert (never string-formatted SQL), then
+    // move it into the transient lease state — proving the widened CHECK domain.
+    let key = [7u8; 32];
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO pubkeys (pubkey) VALUES ($1) RETURNING id",
+    )
+    .bind(&key[..])
+    .fetch_one(&pool)
+    .await?;
+
+    sqlx::query("UPDATE pubkeys SET status = 'in_progress' WHERE id = $1")
+        .bind(id)
+        .execute(&pool)
+        .await?;
+
+    // The contract view collapses in_progress -> discovered.
+    let view_status: String =
+        sqlx::query_scalar("SELECT status FROM pubkey_freshness WHERE id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(
+        view_status, "discovered",
+        "pubkey_freshness must collapse the transient in_progress lease state to discovered"
+    );
+
+    // The internal lease/retry columns must not be exposed by the contract view.
+    for hidden in ["claimed_at", "fetch_attempts"] {
+        let exposed: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.columns \
+             WHERE table_name = 'pubkey_freshness' AND column_name = $1)",
+        )
+        .bind(hidden)
+        .fetch_one(&pool)
+        .await?;
+        assert!(
+            !exposed,
+            "pubkey_freshness must not expose internal column {hidden}"
+        );
+    }
+
+    // The contract view exposes exactly the documented three columns.
+    let view_cols: Vec<String> = sqlx::query_scalar(
+        "SELECT column_name FROM information_schema.columns \
+         WHERE table_name = 'pubkey_freshness' ORDER BY column_name",
+    )
+    .fetch_all(&pool)
+    .await?;
+    assert_eq!(
+        view_cols,
+        vec![
+            "id".to_string(),
+            "last_fetched_at".to_string(),
+            "status".to_string(),
+        ],
+        "pubkey_freshness must expose exactly (id, status, last_fetched_at)"
+    );
+
+    Ok(())
+}
