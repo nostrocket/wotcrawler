@@ -45,6 +45,7 @@ pub type Window = Vec<Event>;
 pub struct ScriptedRelay {
     windows: Rc<RefCell<std::collections::VecDeque<Window>>>,
     untils: Rc<RefCell<Vec<Option<Timestamp>>>>,
+    limits: Rc<RefCell<Vec<Option<usize>>>>,
 }
 
 impl ScriptedRelay {
@@ -54,6 +55,7 @@ impl ScriptedRelay {
         Self {
             windows: Rc::new(RefCell::new(windows.into_iter().collect())),
             untils: Rc::new(RefCell::new(Vec::new())),
+            limits: Rc::new(RefCell::new(Vec::new())),
         }
     }
 
@@ -62,6 +64,13 @@ impl ScriptedRelay {
     /// the loop paged back rather than stopping on the capped first window.
     pub fn untils(&self) -> Vec<Option<Timestamp>> {
         self.untils.borrow().clone()
+    }
+
+    /// The filter `limit` the relay saw on each REQ, in order. Used by the
+    /// production-wiring test to assert the per-window cap is the cached
+    /// NIP-11 `max_limit` (WR-03 / RELAY-02).
+    pub fn limits_seen(&self) -> Vec<Option<usize>> {
+        self.limits.borrow().clone()
     }
 
     /// Produce the injectable async fetch fn for `paginate_chunk`. Each call pops
@@ -74,6 +83,22 @@ impl ScriptedRelay {
         let untils = Rc::clone(&self.untils);
         move |filter: Filter| {
             untils.borrow_mut().push(filter.until);
+            let next = windows.borrow_mut().pop_front().unwrap_or_default();
+            std::future::ready(Ok(next))
+        }
+    }
+
+    /// Like [`Self::fetch_fn`] but also records the filter's `limit` on each REQ
+    /// so a test can assert the per-window cap sourced from the NIP-11 cache.
+    pub fn limit_capturing_fetch_fn(
+        &self,
+    ) -> impl FnMut(Filter) -> std::future::Ready<Result<Vec<Event>, RelayError>> + '_ {
+        let windows = Rc::clone(&self.windows);
+        let untils = Rc::clone(&self.untils);
+        let limits = Rc::clone(&self.limits);
+        move |filter: Filter| {
+            untils.borrow_mut().push(filter.until);
+            limits.borrow_mut().push(filter.limit);
             let next = windows.borrow_mut().pop_front().unwrap_or_default();
             std::future::ready(Ok(next))
         }
