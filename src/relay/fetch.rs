@@ -94,6 +94,10 @@ where
     // and use the count of NEWLY-seen ids as the page-progress signal.
     let mut seen: HashSet<EventId> = HashSet::new();
     let mut until = Timestamp::now();
+    // The `until` used by the PREVIOUS fetch, so this iteration can tell a fresh
+    // page-back (until advanced) from a re-request of the SAME pinned boundary
+    // second (until unchanged). `None` before the first fetch (CR-03 residual).
+    let mut prev_until: Option<Timestamp> = None;
     let mut pages: usize = 0;
     loop {
         // Hard page budget (CR-04 / T-02-16): a relay ignoring `until` and
@@ -104,11 +108,14 @@ where
                 "page budget ({MAX_PAGES_PER_CHUNK}) exceeded for author chunk"
             )));
         }
+        // The `until` this fetch will carry — captured before the fetch so the
+        // stall check below compares THIS window's until against the PRIOR one.
+        let current_until = until;
         let filter = Filter::new()
             .authors(authors.iter().copied())
             .kind(kind)
             .limit(cap)
-            .until(until);
+            .until(current_until);
         let events = fetch(filter).await?;
         pages += 1;
         let returned = events.len();
@@ -124,17 +131,40 @@ where
             }
         }
 
-        // Zero new ids means the (possibly capped) boundary re-request returned
-        // only already-seen events — genuine exhaustion. Stop even when
-        // `returned >= cap`, so a relay echoing a full duplicate window cannot
-        // keep the loop alive (CR-04).
+        // Zero new ids: either genuine exhaustion OR an unresolvable boundary
+        // stall (CR-03 residual / T-02-15). Distinguish them:
+        //
+        // - Boundary-second STALL — all three hold: the window is still capped
+        //   (`returned >= cap`, so the relay may be truncating), `until` did NOT
+        //   advance since the last fetch (`prev_until == Some(current_until)` —
+        //   pinned at the boundary second), and the re-request yielded nothing
+        //   new (`new_ids == 0`). A deterministic newest-first relay is re-serving
+        //   the SAME cap-sized prefix for the pinned `until=T` while more events
+        //   remain at that second. Completing here would silently truncate the
+        //   follow list, so surface a requeue Err instead.
+        //
+        // - Genuine EXHAUSTION — any other zero-new-id case: a short window
+        //   (`returned < cap`), or `until` JUST advanced into this boundary
+        //   second (the FIRST page-back to `until=T` has `prev_until !=
+        //   Some(current_until)`), so a zero-new-id result is the real end of the
+        //   data. Break with Ok — never turn legitimate exhaustion into an error.
         if new_ids == 0 {
+            if returned >= cap && prev_until == Some(current_until) {
+                return Err(RelayError::FetchTimeout(format!(
+                    "boundary-second stall: relay re-served the same cap-sized \
+                     prefix for pinned until={} with more events remaining",
+                    current_until.as_secs()
+                )));
+            }
             break;
         }
         match page_back(returned, cap, oldest) {
             Some(next) => until = next,
             None => break,
         }
+        // Record the until THIS fetch used, so the next iteration can detect a
+        // pinned (unchanged) boundary second vs a fresh page-back.
+        prev_until = Some(current_until);
     }
     Ok(out)
 }
