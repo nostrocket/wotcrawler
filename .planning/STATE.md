@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 02-05-PLAN.md - fetch BLOCKERs CR-01 to CR-04 closed
-last_updated: "2026-06-13T07:01:24.427Z"
+last_updated: "2026-06-13T07:10:03.320Z"
 last_activity: 2026-06-13 -- Phase 02 execution started
 progress:
   total_phases: 5
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 12
-  completed_plans: 11
-  percent: 20
+  completed_plans: 12
+  percent: 40
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 ## Current Position
 
 Phase: 02 (relay-acquisition-validation) — EXECUTING
-Plan: 5 of 9
+Plan: 6 of 9
 Status: Ready to execute
 Last activity: 2026-06-13 -- Phase 02 execution started
 
@@ -64,6 +64,7 @@ Progress: [█████░░░░░] 50%
 | Phase 02 P07 | 3 | - tasks | - files |
 | Phase 02 P08 | 3 | - tasks | - files |
 | Phase 02 P08 | 3 | 2 tasks | 2 files |
+| Phase 02 P09 | 22 | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -88,6 +89,7 @@ Recent decisions affecting current work:
 - [Phase 02-06]: CR-01 closed: ingest_events now verifies before dedup so only verified event ids enter the cross-relay seen-set; a forged id-squat copy (T-02-14) can no longer consume a genuine id and suppress the honest follow list. Genuine dedup preserved.
 - [Phase ?]: [02-07] NIP-11 fetch hardened (CR-06/WR-02): shared LazyLock reqwest client with 10s request + 5s connect timeout (T-02-18); MAX_NIP11_BYTES=64KiB stream-and-bail body bound (T-02-19); MAX_ADVERTISED_LIMIT=5000 upper-clamp on advertised max_limit so an absurd value cannot defeat count-vs-cap pagination (T-02-13, Pitfall 1).
 - [Phase ?]: [02-08] Rate limiter correctness: shared Arc<DirectLimiter> per relay so concurrent acquire() obeys one GCRA quota (CR-05/T-02-10); backoff saturates at failures >= 64 closing the u128 checked_shl zero-delay window at 119..=127 (WR-01/T-02-20). Production wiring is 02-09.
+- [Phase ?]: [Phase 2]: [02-09] WR-03 closed — paginate_chunk_gated gates every fetch_events behind RateLimiterRegistry::acquire (T-02-10); acquire_validated_lists_client sources max_limit from LimitCache (T-02-13); spawn_notice_consumer routes NOTICE/CLOSED into record_notice via the shared registry (T-02-09).
 
 ### Pending Todos
 
@@ -108,6 +110,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-13T07:01:24.424Z
+Last session: 2026-06-13T07:09:48.162Z
 Stopped at: Completed 02-05-PLAN.md - fetch BLOCKERs CR-01 to CR-04 closed
 Resume file: None
