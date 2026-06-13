@@ -194,8 +194,27 @@ where
 
         // Opportunistically reap finished workers so `workers` does not grow
         // without bound across many claim iterations (the permit cap bounds
-        // *concurrency*; this bounds the join-handle vector).
-        workers.retain(|h| !h.is_finished());
+        // *concurrency*; this bounds the join-handle vector). We JOIN each
+        // finished handle rather than dropping it (CR-01): a worker that returned
+        // `Err(StoreError)` — a dropped DB connection mid-apply, an upsert failure,
+        // a panic — must surface here, otherwise its claimed authors stay
+        // `in_progress` forever (invisible to the `discovered`-only claim scan)
+        // until the next restart's reclaim. Partition off the finished handles,
+        // keep the still-running ones, then join the finished set so the first
+        // error aborts the run (the same propagation the drain-on-empty path uses).
+        let mut still_running = Vec::with_capacity(workers.len());
+        let mut finished = Vec::new();
+        for handle in workers.drain(..) {
+            if handle.is_finished() {
+                finished.push(handle);
+            } else {
+                still_running.push(handle);
+            }
+        }
+        workers = still_running;
+        for handle in finished {
+            join_worker(handle).await?;
+        }
     }
 
     Ok(stats)
