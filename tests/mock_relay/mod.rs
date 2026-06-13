@@ -104,3 +104,50 @@ impl ScriptedRelay {
         }
     }
 }
+
+/// Records the `until` each REQ carried, shared with the fetch fn returned by
+/// [`prefix_for_until_fetch_fn`] so a test can assert the loop pinned `until`
+/// across iterations.
+pub type UntilLog = Rc<RefCell<Vec<Option<Timestamp>>>>;
+
+/// A *deterministic newest-first relay* fetch fn for the CR-03 residual
+/// (02-VERIFICATION.md gap #1): unlike [`ScriptedRelay`], which hands each REQ
+/// the next pop-front window (and so can be hand-fed the cut sibling), this
+/// models a real relay that, for **any** filter, returns the cap-sized
+/// newest-first prefix of a fixed event pool clamped to `filter.until`.
+///
+/// Because the pool is fixed and the prefix is recomputed per call, a pinned
+/// `until=T` always yields the **same** cap-sized prefix and NEVER volunteers a
+/// third sibling sharing the boundary second `T` — exactly the deterministic
+/// behavior that silently truncates a follow list at the cap boundary. Genuine
+/// page-back to an older `until` advances into older events as a real relay
+/// would.
+///
+/// `pool` is sorted newest-first internally; `cap` is the per-window cap. The
+/// returned closure pushes each `filter.until` into `untils` (the same recording
+/// pattern as [`ScriptedRelay::untils`]) so a test can assert `until` stayed
+/// pinned at the boundary second across iterations.
+pub fn prefix_for_until_fetch_fn(
+    pool: Vec<Event>,
+    cap: usize,
+    untils: UntilLog,
+) -> impl FnMut(Filter) -> std::future::Ready<Result<Vec<Event>, RelayError>> {
+    // Sort newest-first once; the relay always serves from this fixed view.
+    let mut sorted = pool;
+    sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    move |filter: Filter| {
+        untils.borrow_mut().push(filter.until);
+        // Clamp to `until` (inclusive: created_at <= until), then take the
+        // newest `cap`. An absent `until` means "no upper bound" (window 1).
+        let window: Vec<Event> = sorted
+            .iter()
+            .filter(|e| match filter.until {
+                Some(until) => e.created_at <= until,
+                None => true,
+            })
+            .take(cap)
+            .cloned()
+            .collect();
+        std::future::ready(Ok(window))
+    }
+}

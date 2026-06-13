@@ -12,7 +12,10 @@ use nostr_sdk::Kind;
 use web_of_trust::error::RelayError;
 use web_of_trust::relay::fetch::{page_back, paginate_chunk, MAX_PAGES_PER_CHUNK};
 
-use mock_relay::{event_at, ScriptedRelay};
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use mock_relay::{event_at, prefix_for_until_fetch_fn, ScriptedRelay};
 
 #[test]
 fn page_back_pages_on_capped_window_only() {
@@ -154,6 +157,63 @@ async fn budget_guard_errors_on_adversarial_relay() {
         relay.untils().len(),
         MAX_PAGES_PER_CHUNK,
         "the loop must stop at exactly MAX_PAGES_PER_CHUNK fetches"
+    );
+}
+
+#[tokio::test]
+async fn deterministic_boundary_stall_surfaces_error() {
+    // CR-03 residual (02-VERIFICATION.md gap #1): a DETERMINISTIC newest-first
+    // relay that caps at the boundary second. Three events A(T), B(T), C(T) all
+    // share the oldest second T (plus one newer N(T+1)); with cap=2 the relay
+    // NEVER volunteers the third sibling for a pinned until=T — it re-serves the
+    // SAME cap-sized prefix. Unlike inclusive_boundary_keeps_boundary_event,
+    // this test does NOT hand-feed the cut sibling: it models real relay
+    // behavior via prefix_for_until_fetch_fn over a fixed pool.
+    //
+    // Trace (cap=2):
+    //   Window 1 (until=now): [N(T+1), A(T)] -> capped, oldest=T -> page back to until=T.
+    //   Window 2 (until=T):   [A(T), B(T)]   -> new_ids=1 (B), still capped, until pinned at T.
+    //   Window 3 (until=T):   [A(T), B(T)]   -> new_ids=0, until STILL pinned at T, STILL capped.
+    // The third sibling C(T) is never served. The loop must NOT silently
+    // complete with a truncated Ok that omits C(T): it must surface the
+    // unresolvable boundary-second stall as a requeue Err.
+    let cap = 2;
+    let authors = vec![nostr_sdk::Keys::generate().public_key()];
+
+    // T is the shared boundary second; N is one second newer.
+    let t = 4_000u64;
+    let a = event_at(1, t);
+    let b = event_at(2, t);
+    let c = event_at(3, t); // the sibling cut by the cap — never served
+    let n = event_at(4, t + 1);
+    // Order the pool so the newest cap=2 at-or-before T are deterministically
+    // A then B (C is the third, never reached). event seeds differ so ids
+    // differ; created_at ties at T are broken by the sort's stable-ish order,
+    // but we only need the relay to consistently expose A,B (not C) for until=T.
+    let pool = vec![n.clone(), a.clone(), b.clone(), c.clone()];
+
+    let untils: mock_relay::UntilLog = Rc::new(RefCell::new(Vec::new()));
+    let fetch = prefix_for_until_fetch_fn(pool, cap, Rc::clone(&untils));
+
+    let result = paginate_chunk(&authors, Kind::ContactList, cap, fetch).await;
+
+    // POST-FIX: the unresolvable stall surfaces as a requeue Err, never a
+    // silent truncated Ok that omits C(T). PRE-FIX this FAILS (Ok returned).
+    assert!(
+        matches!(result, Err(_)),
+        "a deterministic relay re-serving the same cap-sized prefix for a pinned \
+         until=T (more events remaining) must surface a requeue Err, got {result:?}"
+    );
+
+    // The loop must have pinned until=T across the stall iterations (not advanced).
+    let seen = untils.borrow();
+    let pinned_at_t = seen
+        .iter()
+        .filter(|u| matches!(u, Some(ts) if ts.as_secs() == t))
+        .count();
+    assert!(
+        pinned_at_t >= 2,
+        "the loop must re-issue until=T at least twice (pinned boundary stall), saw {seen:?}"
     );
 }
 
