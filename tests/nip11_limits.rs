@@ -4,7 +4,7 @@
 
 use web_of_trust::relay::nip11::{
     limits_from_bytes, limits_from_json, LimitCache, RelayLimits, DEFAULT_MAX_FILTERS,
-    DEFAULT_MAX_LIMIT, DEFAULT_MAX_SUBSCRIPTIONS, MAX_NIP11_BYTES,
+    DEFAULT_MAX_LIMIT, DEFAULT_MAX_SUBSCRIPTIONS, MAX_ADVERTISED_LIMIT, MAX_NIP11_BYTES,
 };
 
 #[test]
@@ -51,6 +51,28 @@ fn non_positive_advertised_values_fall_back_to_defaults() {
     assert_eq!(limits.max_limit, DEFAULT_MAX_LIMIT);
     assert_eq!(limits.max_subscriptions, DEFAULT_MAX_SUBSCRIPTIONS);
     assert_eq!(limits.max_filters, DEFAULT_MAX_FILTERS);
+}
+
+#[test]
+fn advertised_max_limit_is_upper_clamped() {
+    // A relay advertising an absurd max_limit must NOT produce a cap that large:
+    // it is clamped to MAX_ADVERTISED_LIMIT so it cannot defeat count-vs-cap
+    // pagination by making one EOSE window look complete (WR-02, Pitfall 1).
+    let json = r#"{ "limitation": { "max_limit": 2000000000 } }"#;
+    let limits = limits_from_json(json).expect("absurd advertised value is still parseable");
+    assert_eq!(
+        limits.max_limit, MAX_ADVERTISED_LIMIT,
+        "an advertised max_limit above the ceiling is clamped down to MAX_ADVERTISED_LIMIT"
+    );
+}
+
+#[test]
+fn advertised_max_limit_below_ceiling_is_preserved() {
+    // A reasonable advertised value under the ceiling is honored as-is.
+    let json = r#"{ "limitation": { "max_limit": 1000 } }"#;
+    let limits = limits_from_json(json).expect("valid doc");
+    assert!(1000 <= MAX_ADVERTISED_LIMIT);
+    assert_eq!(limits.max_limit, 1000);
 }
 
 #[test]
