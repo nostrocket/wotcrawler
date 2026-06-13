@@ -91,7 +91,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Gap-Closure Wave 4** *(from 02-VERIFICATION.md re-verification run 3; closes the final BLOCKER CR-01-new; edits src/relay/fetch.rs so it runs after 02-10/02-11)*
 
-  - [ ] 02-12-PLAN.md — fetch.rs paginate_chunk: fire the boundary stall on the FIRST capped zero-new-id re-request via page_back(returned, cap, oldest) == current_until, closing the no-newer-event silent truncation the prev_until guard missed (CR-01-new) [RELAY-03]
+  - [x] 02-12-PLAN.md — fetch.rs paginate_chunk: fire the boundary stall on the FIRST capped zero-new-id re-request via page_back(returned, cap, oldest) == current_until, closing the no-newer-event silent truncation the prev_until guard missed (CR-01-new) [RELAY-03]
 
 ### Phase 3: Graph Writer & BFS Frontier
 
@@ -142,7 +142,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Schema & Data Contract | 3/3 | Complete   | 2026-06-12 |
-| 2. Relay Acquisition & Validation | 11/11 | Complete   | 2026-06-13 |
+| 2. Relay Acquisition & Validation | 12/12 | Complete   | 2026-06-13 |
 | 3. Graph Writer & BFS Frontier | 0/TBD | Not started | - |
 | 4. Daemon, Staleness Loop & Observability | 0/TBD | Not started | - |
 | 5. NIP-65 Outbox Routing & Relay Health | 0/TBD | Not started | - |
