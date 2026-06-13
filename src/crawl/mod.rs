@@ -13,9 +13,10 @@
 //! Phase requirements served here:
 //! - CRAWL-01: crawl starts from a single configurable anchor (see
 //!   [`frontier::seed_anchor`]).
-//! - CRAWL-02: only pubkeys reachable through follows are ever enqueued
+//! - CRAWL-02: only pubkeys discovered through follows are ever enqueued
 //!   (structural — `upsert_pubkey`-on-followee is the only insertion path
-//!   besides the anchor seed).
+//!   besides the anchor seed; there is no reach-ability predicate or recursive
+//!   CTE — that anti-pattern is forbidden, RESEARCH Pitfall 4).
 //! - CRAWL-03: the frontier is DB-resident and crash-safe — completed
 //!   (`fetched`) work is never re-claimed ([`frontier::claim_batch`] selects only
 //!   `discovered`), and orphaned `in_progress` leases are reset at startup
@@ -26,6 +27,7 @@
 //!   ([`frontier::requeue_or_fail`] routes the terminal `failed` write through a
 //!   timestamp-stamping UPDATE).
 
+pub mod apply;
 pub mod frontier;
 
 /// Default number of `discovered` authors a worker batch-claims at once (D-07).
