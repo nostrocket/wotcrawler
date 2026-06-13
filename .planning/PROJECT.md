@@ -12,7 +12,11 @@ From one anchor pubkey, maintain a complete and continuously fresh follow graph 
 
 ### Validated
 
-(None yet — ship to validate)
+- Reachable-component discovery logic: anchor-seeded, structurally reachability-gated BFS reaches the full follow component and never explores spam islands (proven by integration tests) — *Validated in Phase 3: Graph Writer & BFS Frontier*
+- Durable graph state via transactional edge diffs (add/remove deltas, newest-wins idempotency on replaceable kind-3) persisted to the shared PostgreSQL schema — *Validated in Phase 3*
+- Crash-safe DB-resident frontier: claim/lease via `FOR UPDATE SKIP LOCKED`, startup reclaim of orphaned work, no re-fetch of completed lists; every terminal fetch state stamps freshness metadata — *Validated in Phase 3*
+
+> Note: the long-running daemon, staleness-driven refresh loop, and observability remain Active — Phase 3 delivers and proves the crawl/graph mechanics that those phases orchestrate.
 
 ### Active
 
@@ -78,4 +82,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-11 after initialization*
+*Last updated: 2026-06-13 — Phase 3 (Graph Writer & BFS Frontier) complete*
