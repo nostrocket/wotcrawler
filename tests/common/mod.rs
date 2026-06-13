@@ -84,6 +84,23 @@ pub fn forged_event(signer: &Keys, kind: Kind, created_at: Timestamp) -> Event {
     event
 }
 
+/// Build a forged "id-squat" [`Event`] that carries `target`'s claimed `id`
+/// while failing [`Event::verify`] (CR-01 / T-02-14 attack fixture).
+///
+/// A hostile relay can send a forged event that reuses a genuine event's id to
+/// try to consume that id in the dedup seen-set before the honest copy arrives.
+/// This fixture models exactly that: it builds a tampered event (content mutated
+/// after signing, so its committed id and signature no longer match its
+/// content), then overwrites the stored `id` to `target.id`. The result still
+/// *claims* `target.id`, but `verify()` recomputes the id from the (tampered)
+/// content and finds a mismatch, so the gate rejects it. If dedup ran before
+/// verification, this forgery would poison `target.id` in the seen-set.
+pub fn id_squat_forgery(signer: &Keys, kind: Kind, created_at: Timestamp, target: &Event) -> Event {
+    let mut event = forged_event(signer, kind, created_at);
+    event.id = target.id;
+    event
+}
+
 /// Build two valid signed events with the SAME `created_at` but different ids
 /// (for the lowest-id tie-break test, INGEST-03 / Pitfall 3).
 ///
