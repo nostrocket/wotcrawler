@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 02-05-PLAN.md - fetch BLOCKERs CR-01 to CR-04 closed
-last_updated: "2026-06-13T07:50:44.089Z"
+last_updated: "2026-06-13T07:57:26.383Z"
 last_activity: 2026-06-13 -- Phase 02 execution started
 progress:
   total_phases: 5
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 14
-  completed_plans: 13
-  percent: 20
+  completed_plans: 14
+  percent: 40
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 ## Current Position
 
 Phase: 02 (relay-acquisition-validation) — EXECUTING
-Plan: 2 of 11
+Plan: 3 of 11
 Status: Ready to execute
 Last activity: 2026-06-13 -- Phase 02 execution started
 
@@ -66,6 +66,7 @@ Progress: [█████░░░░░] 50%
 | Phase 02 P08 | 3 | 2 tasks | 2 files |
 | Phase 02 P09 | 22 | 2 tasks | 4 files |
 | Phase 02 P10 | 5 | 2 tasks | 3 files |
+| Phase 02 P11 | 6 | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -92,6 +93,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [02-08] Rate limiter correctness: shared Arc<DirectLimiter> per relay so concurrent acquire() obeys one GCRA quota (CR-05/T-02-10); backoff saturates at failures >= 64 closing the u128 checked_shl zero-delay window at 119..=127 (WR-01/T-02-20). Production wiring is 02-09.
 - [Phase ?]: [Phase 2]: [02-09] WR-03 closed — paginate_chunk_gated gates every fetch_events behind RateLimiterRegistry::acquire (T-02-10); acquire_validated_lists_client sources max_limit from LimitCache (T-02-13); spawn_notice_consumer routes NOTICE/CLOSED into record_notice via the shared registry (T-02-09).
 - [Phase ?]: [Phase 2]: [02-10] BLOCKER 1 closed (CR-03 residual / RELAY-03): paginate_chunk tracks prev_until across iterations; a repeated pinned until=T that stays capped with zero new ids returns Err(FetchTimeout) so the caller requeues rather than silently completing a truncated follow list. Genuine exhaustion (short window, or first page-back into the boundary second) still breaks Ok. Reused FetchTimeout (no new variant). Deterministic-relay test (prefix_for_until_fetch_fn) proves it RED then GREEN.
+- [Phase ?]: [02-11] WR-03 residual / RELAY-04 closed: per-relay GCRA limiter keyed on the caller's individual relay_url threaded through fetch_complete/fetch_complete_with_timeout; pool_label demoted to diagnostics, never the acquire() key. Two pooled relays now mint two independent limiter keys; GCRA state survives pool churn.
 
 ### Pending Todos
 
@@ -112,6 +114,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-13T07:50:15.266Z
+Last session: 2026-06-13T07:56:54.834Z
 Stopped at: Completed 02-05-PLAN.md - fetch BLOCKERs CR-01 to CR-04 closed
 Resume file: None
