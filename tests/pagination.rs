@@ -218,6 +218,65 @@ async fn deterministic_boundary_stall_surfaces_error() {
 }
 
 #[tokio::test]
+async fn no_newer_event_boundary_stall_surfaces_error() {
+    // CR-01-new (02-VERIFICATION.md gaps_remaining, RELAY-03): the companion to
+    // deterministic_boundary_stall_surfaces_error. The ONLY structural difference
+    // is that there is NO event newer than the boundary second T — every pool
+    // event shares T (no N(T+1)). This is the path 02-10's prev_until 2-visit
+    // guard leaves open: when until first becomes T, prev_until is Some(now), so
+    // `prev_until == Some(current_until)` is FALSE on the second window and the
+    // zero-new-id result is misclassified as genuine exhaustion, silently dropping
+    // the third sibling C(T).
+    //
+    // Trace (cap=2), pool = [A(T), B(T), C(T)], all at second T, no newer event:
+    //   Window 1 (until=now): newest cap=2 at-or-before now = [A(T), B(T)];
+    //     oldest=T; capped; page_back -> Some(T); until=T; prev_until=Some(now).
+    //   Window 2 (until=T):   [A(T), B(T)] again; new_ids=0; returned(2) >= cap(2);
+    //     prev_until is Some(now) != Some(T) so the OLD 2-visit guard does NOT fire.
+    // The third sibling C(T) is never served. The loop must NOT silently complete
+    // with a truncated Ok([A, B]) that omits C(T): it must surface the boundary
+    // stall as a requeue Err on the FIRST capped zero-new-id re-request of until=T
+    // (page_back would re-pin the same until). PRE-FIX this FAILS (silent Ok).
+    let cap = 2;
+    let authors = vec![nostr_sdk::Keys::generate().public_key()];
+
+    // T is the shared boundary second; NO event is newer than T (the sole
+    // structural difference from deterministic_boundary_stall_surfaces_error).
+    let t = 4_000u64;
+    let a = event_at(1, t);
+    let b = event_at(2, t);
+    let c = event_at(3, t); // the sibling cut by the cap — never served
+    let pool = vec![a.clone(), b.clone(), c.clone()];
+
+    let untils: mock_relay::UntilLog = Rc::new(RefCell::new(Vec::new()));
+    let fetch = prefix_for_until_fetch_fn(pool, cap, Rc::clone(&untils));
+
+    let result = paginate_chunk(&authors, Kind::ContactList, cap, fetch).await;
+
+    // POST-FIX: the no-newer-event boundary stall surfaces as a requeue Err, never
+    // a silent truncated Ok([A, B]) that omits C(T). We do NOT assert WHICH two of
+    // the three same-second events the prefix returns (that depends on the stable
+    // newest-first sort over equal created_at) — only that the result is Err.
+    assert!(
+        matches!(result, Err(_)),
+        "a deterministic relay with NO event newer than the boundary second, \
+         re-serving the same cap-sized prefix for a pinned until=T, must surface \
+         a requeue Err rather than a silent truncated Ok, got {result:?}"
+    );
+
+    // The boundary second T must have been re-requested at least once.
+    let seen = untils.borrow();
+    let pinned_at_t = seen
+        .iter()
+        .filter(|u| matches!(u, Some(ts) if ts.as_secs() == t))
+        .count();
+    assert!(
+        pinned_at_t >= 1,
+        "the loop must re-issue until=T at least once (boundary second pinned), saw {seen:?}"
+    );
+}
+
+#[tokio::test]
 async fn capped_first_window_triggers_second_page() {
     let cap = 2;
     let authors = vec![
