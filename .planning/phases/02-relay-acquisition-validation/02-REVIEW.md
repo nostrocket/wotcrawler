@@ -1,273 +1,197 @@
 ---
 phase: 02-relay-acquisition-validation
-reviewed: 2026-06-13T08:05:00Z
+reviewed: 2026-06-13T09:00:00Z
 depth: standard
-files_reviewed: 6
+files_reviewed: 2
 files_reviewed_list:
   - src/relay/fetch.rs
-  - src/relay/mod.rs
-  - src/relay/rate_limit.rs
   - tests/pagination.rs
-  - tests/production_wiring.rs
-  - tests/mock_relay/mod.rs
 findings:
-  critical: 1
-  warning: 2
-  info: 3
-  total: 6
+  critical: 0
+  warning: 3
+  info: 2
+  total: 5
 status: issues_found
 ---
 
-# Phase 02 (gap-closure 02-10/02-11): Code Review Report
+# Phase 02 (gap-closure 02-12): Code Review Report
 
-**Reviewed:** 2026-06-13T08:05:00Z
+**Reviewed:** 2026-06-13T09:00:00Z
 **Depth:** standard
-**Files Reviewed:** 6 (changes introduced by commits 1ac92a9..eca222a)
+**Files Reviewed:** 2
 **Status:** issues_found
 
 ## Summary
 
-This review covers the gap-closure changes introduced by plans 02-10 and 02-11, which
-addressed two blockers identified in the prior review cycle (preserved in git history):
+This is a gap-closure review of plan 02-12 (RELAY-03 no-newer-event boundary
+stall). The prior review (preserved in git history) raised CR-01: the
+`prev_until` 2-visit guard missed the no-newer-event case and silently dropped
+boundary-second siblings. Plan 02-12 closes it by OR-combining a first-visit
+detector at `paginate_chunk` lines 161-171:
 
-- **02-10 (CR-03 residual / RELAY-03):** boundary-second stall detection via `prev_until`
-  tracking in `paginate_chunk` — surfaces an unresolvable pinned-`until` stall as a requeue
-  `Err` rather than silently completing with a truncated event list.
-- **02-11 (WR-03 residual / RELAY-04):** per-relay rate-limiter keying — threads the
-  caller's individual `relay_url` through `fetch_complete` / `fetch_complete_with_timeout`,
-  replacing the joined pool-string key, and demotes `pool_label` to diagnostics.
+```rust
+if returned >= cap
+    && (prev_until == Some(current_until)
+        || page_back(returned, cap, oldest) == Some(current_until))
+```
 
-**Disposition of prior blockers:**
+**Disposition of prior CR-01:** **Closed.** I traced every test in
+`tests/pagination.rs` against the implementation. The new
+`page_back(...) == Some(current_until)` disjunct fires on the FIRST capped
+zero-new-id re-request of a pinned boundary second, exactly the no-newer-event
+path. `no_newer_event_boundary_stall_surfaces_error` (line 235) now asserts
+`Err`, and the implemented detector matches the fix the prior review proposed.
+Short windows (`returned < cap`) and genuinely-advancing windows
+(`oldest < current_until`, so page_back returns a different timestamp) still
+break with `Ok`, so legitimate exhaustion is preserved in those cases.
 
-- WR-03 (pool-string key collapse): **Closed.** `relay_url` is now threaded from
-  `acquire_validated_lists_client` through `fetch_complete` into
-  `fetch_complete_with_timeout` and used as the `paginate_chunk_gated` key and
-  `FetchTimeout` label. `pool_label` is diagnostics-only. The `two_pooled_relays_get_independent_limiter_keys`
-  test proves two relays mint two separate GCRA limiters.
-
-- CR-03 residual (boundary-second stall): **Partially closed, with a correctness gap.**
-  The `prev_until` tracker correctly detects the stall in the specific scenario where Window 2
-  contributes at least one new event before Window 3 re-serves the same prefix. However,
-  one structural scenario is not detected — see CR-01 below.
-
-The remaining findings are one new correctness BLOCKER (a gap in the stall detection
-coverage), two warnings (one a liveness concern on the `fetch_window_with_deadline` elapsed
-check — a residual from prior WR-01 — and one on the fetch-before-rate-limit ordering),
-and three info items.
+The change is correct in its fail-safe direction (it never converts a stall
+into silent truncation — worst case is a recoverable requeue). No BLOCKERs.
+However the change carries a real false-positive cost against honest relays,
+the retained `prev_until` disjunct is now dead code, and a symmetric
+zero-new-id blind spot remains unaddressed.
 
 ## Narrative Findings (AI reviewer)
 
-## Critical Issues
-
-### CR-01: Stall detection misses the case where all pool events share the boundary second (no newer event in Window 1)
-
-**File:** `src/relay/fetch.rs:100-168` (`paginate_chunk`, `prev_until` stall check)
-**Lines:** 151-159 (stall check), 167 (`prev_until` update)
-
-**Issue:** The `prev_until` stall detection requires that `prev_until == Some(current_until)`,
-which can only be true on the **second or later** visit to a given `until=T`. `prev_until` is
-updated to `Some(current_until)` only when `new_ids > 0` AND `page_back` returns `Some(next)`.
-This means the stall fires on iteration N+1 (when `until` is already pinned at T from
-iteration N).
-
-**The gap:** When ALL events in the pool have `created_at == T` (no event at T+1 or later to
-appear in Window 1), the first fetch (`until = now`) returns a capped window of events all at
-T as their `oldest`, so `page_back` returns `Some(T)`. Now `until = T` and `prev_until =
-Some(now)`. Window 2 (`until = T`) re-serves the same cap-sized prefix. `new_ids = 0`.
-The stall check: `prev_until (Some(now)) == Some(current_until T)` → **FALSE**. The loop
-breaks with `Ok`, silently dropping any boundary-second siblings beyond `cap`.
-
-Concrete example (cap = 2, pool = `[A(T), B(T), C(T)]`, no newer event):
-
-- Window 1 (`until = now`): returns `[A(T), B(T)]`. `oldest = T`, capped. `until = T`,
-  `prev_until = Some(now)`.
-- Window 2 (`until = T`): returns `[A(T), B(T)]` again. `new_ids = 0`. Check:
-  `Some(now) == Some(T)` → **FALSE** → `break`. `Ok([A, B])` returned. **C(T) lost.**
-
-The test `deterministic_boundary_stall_surfaces_error` avoids this gap by constructing the
-pool with a newer event `N(T+1)`, ensuring Window 1 returns `[N(T+1), A(T)]` (with `A(T)` as
-new), so Window 2 contributes `B(T)` as a new event (`new_ids = 1`), allowing `prev_until`
-to reach `Some(T)` before Window 3 re-stalls. The test covers this specific scenario but
-leaves the no-newer-event scenario untested and undetected.
-
-**Scope note:** For kind-3 follow lists (replaceable events, typically one per pubkey), the
-no-newer-event scenario is less common than for unreplaceable event kinds, but it can occur
-when a relay serves old archived events with identical `created_at` values (clock-synchronized
-clients, migration artifacts). The stall also goes undetected when `until = now` returns
-exactly cap events that all share the oldest second and happen to have no complement in the
-pool at any later second — a race-window scenario for a crawl that re-fetches a relay seconds
-after the original write.
-
-**Fix:** Detect the stall on the FIRST visit to a boundary second that returns `new_ids == 0`
-while still capped, not only on the second visit. One approach: when `new_ids == 0` and
-`returned >= cap`, check whether `until` is about to remain unchanged (i.e. `page_back` would
-return `Some(oldest) == current_until`). If so, the relay is already pinned at this boundary
-second on the very first re-request and a stall is certain:
-
-```rust
-if new_ids == 0 {
-    // Stall on ANY pinned-until capped zero-new-id window, regardless of
-    // whether this is the first or Nth visit to this until value.
-    // When returned >= cap AND page_back would return the same `until`
-    // (i.e. oldest == current_until), the relay is pinned and more events
-    // may remain. Signal a requeue immediately.
-    let next = page_back(returned, cap, oldest);
-    if returned >= cap && next == Some(current_until) {
-        return Err(RelayError::FetchTimeout(format!(
-            "boundary-second stall: relay re-served the same cap-sized \
-             prefix for pinned until={} with more events remaining",
-            current_until.as_secs()
-        )));
-    }
-    break;
-}
-```
-
-This removes the `prev_until` dependency for the stall and catches it on the first pinned
-iteration. The companion test should include a pool with no newer events so the gap is
-covered by a regression test.
-
----
-
 ## Warnings
 
-### WR-01: A complete-but-slow window is misclassified as a timeout (residual from prior review)
+### WR-01: Honest relays with exactly-cap siblings at the boundary second are now misclassified as a stall
 
-**File:** `src/relay/fetch.rs:225-241` (`fetch_window_with_deadline`), `src/relay/fetch.rs:339-345`
+**File:** `src/relay/fetch.rs:161-171`
 
-**Issue:** `fetch_window_with_deadline` passes the full `timeout` to `client.fetch_events`
-(line 341) and then checks `started.elapsed() >= timeout` (line 237). If a relay legitimately
-delivers a complete short window (< cap) but takes the full timeout duration to do so,
-`fetch_events` returns `Ok` at `elapsed ≈ timeout`; the `>=` check then converts that
-complete window into `Err(FetchTimeout)` and requeues it.
+**Issue:** The detector fires whenever `new_ids == 0 && returned >= cap &&
+page_back(returned, cap, oldest) == Some(current_until)`. That condition is ALSO
+true for a perfectly honest, fully-exhausted relay whose oldest second contains
+exactly `cap` events with no cut sibling.
 
-The next retry encounters the same slow relay and trips the identical check — a permanent
-requeue loop for any consistently slow-but-honest relay. The `>=` boundary also makes a
-window finishing at *exactly* the deadline a guaranteed false timeout.
+Trace (cap=2), pool = `[A(T), B(T)]` — only two events at second T, nothing
+older, nothing cut:
 
-This is a pre-existing concern (prior WR-01), unchanged by 02-10/02-11. Highlighted again
-because the per-relay `relay_url` threading (02-11) now makes the requeue label accurate,
-which is beneficial, but the false-timeout condition for slow honest relays persists.
+- Window 1 (`until=now`): `[A(T), B(T)]` → capped, `oldest=T`, page_back →
+  `Some(T)`, so `until=T`.
+- Window 2 (`until=T`): relay re-serves `[A(T), B(T)]` (which is genuinely
+  everything ≤ T) → `new_ids=0`, `returned=2 >= cap`, `oldest=T == current_until`
+  → `page_back == Some(T)` → **Err**.
 
-**Fix:** Pass a strictly shorter budget to `fetch_events` than the outer deadline (e.g.
-`timeout.mul_f32(0.9)` or `timeout - grace`), leaving measurable slack for the elapsed
-check. Alternatively, treat a window as a timeout only when `returned == cap` AND
-`elapsed >= timeout` — a complete short window can never be a silent partial truncation.
+The relay was complete and correct, yet the chunk is requeued as a stall. The
+inline comment (lines 134-160) acknowledges the ambiguity is "unresolvable" and
+chooses requeue over silent truncation — a defensible safety bias the prior
+review endorsed — but the *common* real case is honest relays whose newest
+follow-list events cluster in the same second (kind-3 replacement churn), so
+this generates avoidable re-fetch load against well-behaved relays, in tension
+with the "each list fetched roughly once" / relay-goodwill constraint in
+CLAUDE.md. There is no test covering the honest exactly-cap-and-complete relay,
+so this accepted false-positive is undocumented in the test suite and could be
+"fixed" back into truncation by a future maintainer.
 
----
-
-### WR-02: `paginate_chunk_gated` calls `fetch(filter)` before awaiting the rate limiter, so mock-relay side effects precede the GCRA gate
-
-**File:** `src/relay/fetch.rs:198-213` (`paginate_chunk_gated`)
-**Lines:** 206-210
-
-**Issue:** The wrapping closure inside `paginate_chunk_gated` calls `fetch(filter)` on
-line 206 to create the future, then awaits `registry.acquire(relay_url)` on line 208, then
-awaits `fut` on line 209:
-
+**Fix:** This is inherent to count-vs-cap detection and cannot be resolved
+without a relay-volunteered completeness signal, but the blast radius must be
+bounded so an honest exactly-cap relay is not requeued forever. Tag this error
+distinctly from a network timeout (see WR-03) so the caller can cap retries on
+the ambiguous case, and add a regression test that documents the accepted
+false-positive:
 ```rust
-let fut = fetch(filter);      // side effects happen HERE (window pop, until recorded)
-async move {
-    registry.acquire(relay_url).await?;  // rate limit applied AFTER
-    fut.await
-}
+// Honest relay, exactly cap at the oldest second, genuinely complete:
+// paginate_chunk currently returns Err (accepted false-positive). This test
+// pins that behavior so it is not silently regressed into truncation.
 ```
 
-For the production path (`fetch_window_with_deadline` returning a lazy async future),
-`fetch(filter)` merely constructs the future — no I/O occurs until `fut.await`. The rate
-limiter fires before any network request. This is correct for production.
+### WR-02: The `prev_until` disjunct is now dead — it can never be the deciding branch
 
-However, for the mock relay (`ScriptedRelay::fetch_fn`), the closure pops the next
-scripted window and records the `filter.until` *synchronously* when called, because
-`fetch_fn` returns `std::future::ready(...)`. These side effects — window consumption and
-`until` recording — therefore occur **before** the rate limiter fires.
+**File:** `src/relay/fetch.rs:163`, `:97-100`, `:178-180`
 
-Consequences:
-1. Test assertions about the ordering of `until` recording relative to rate-limiting are
-   unreliable (the mock records `until` before any GCRA delay).
-2. If `registry.acquire()` were to fail in a future refactor (currently infallible), the
-   window would already be popped and the error irrecoverable — the mock relay's state would
-   be desynchronized.
-3. The test `gated_pagination_throttles_each_window` measures elapsed time correctly (the
-   real GCRA delay is still applied before `fut.await`), but the `relay.untils()` log does
-   not reflect the post-GCRA ordering.
+**Issue:** The condition is
+`prev_until == Some(current_until) || page_back(...) == Some(current_until)`.
+For the `prev_until` half to be the deciding branch, it must be true while the
+`page_back` half is false. But `prev_until == Some(current_until)` only becomes
+true after the loop pinned `until` via line 174-175 (`until = next`), where
+`next` came from `page_back(...)` returning `Some(current_until)` on the prior
+iteration. On the pinned re-visit, reaching this branch still requires
+`returned >= cap`, and a relay re-serving the same pinned prefix yields the same
+`oldest`, so `page_back(...) == Some(current_until)` is true too. I could not
+construct an input where the `prev_until` disjunct fires but the `page_back`
+disjunct does not — and the comment at lines 148-152 itself states the page_back
+check "is the stronger first-visit detector," making the 2-visit guard a strict
+subset.
 
-**Fix:** Restructure the closure so `fetch(filter)` is called inside the `async move` block,
-after `registry.acquire()`:
+This is dead code dressed as defense-in-depth. It is not harmful (an OR can only
+widen detection), but it keeps `prev_until` (lines 97-100, 180) as load-bearing
+state that is now meaningful only in comments, inviting future maintainers to
+reason about an invariant that no longer matters. Confirming the deadness: in
+`tests/pagination.rs`, removing the `prev_until` disjunct would not fail any
+test — `no_newer_event_boundary_stall_surfaces_error` and
+`deterministic_boundary_stall_surfaces_error` both pass on the page_back
+disjunct alone, and `capped_reserved_prefix_at_pinned_boundary_surfaces_error`
+(line 100) likewise fires via page_back on its window 2.
 
-```rust
-paginate_chunk(authors, kind, cap, move |filter| {
-    async move {
-        registry.acquire(relay_url).await?;
-        fetch(filter).await   // fetch called AFTER the gate
-    }
-})
-.await
-```
+**Fix:** Either remove `prev_until` and the disjunct entirely (relying on the
+page_back detector the tests already exercise), or, if retained deliberately,
+add a test that fails when ONLY the `prev_until` disjunct is removed AND a test
+that fails when ONLY the `page_back` disjunct is removed, proving both branches
+carry weight. As written, the `prev_until` branch is unverified by construction.
 
-This requires `fetch` to be `Send` or the async block to be on the same thread, which is
-compatible with the existing `FnMut(Filter) -> Fut` bound since the closure is called
-sequentially. For the production path the observable behavior is identical; for the mock
-path the side effects are correctly sequenced after the rate limiter.
+### WR-03: Boundary-stall and budget errors reuse `FetchTimeout`, conflating three failure modes the caller must distinguish
 
----
+**File:** `src/relay/fetch.rs:166-170` (stall), `:107-109` (budget), `:251` (real timeout)
+
+**Issue:** The boundary-second stall (line 166), the page-budget exhaustion
+(line 107), and a genuine network timeout (`fetch_window_with_deadline`, line
+251) all return `RelayError::FetchTimeout`. The caller's requeue policy cannot
+tell them apart without parsing the message string. This directly undermines the
+fix for WR-01: bounding retries on the ambiguous honest-exactly-cap case
+requires distinguishing "boundary stall (may already be complete)" from "relay
+timed out (retry later)" from "relay hostile, budget blown (alert operator)".
+Treating all three identically means an honest exactly-cap relay (WR-01) is
+requeued on the same unbounded path as a transient timeout, and operators
+reading `FetchTimeout` logs cannot separate a slow relay from a truncating one —
+working against the relay-health observability requirement in CLAUDE.md.
+
+**Fix:** Introduce dedicated variants `BoundaryStall { until: u64 }` and
+`PageBudgetExceeded(String)` alongside `FetchTimeout`, so the requeue layer,
+retry caps (WR-01), and metrics can treat them differently.
 
 ## Info
 
-### IN-01: `FetchTimeout` variant conflates genuine timeouts with boundary-second stalls
+### IN-01: Zero-new-id capped window with `oldest < current_until` still breaks `Ok` — a symmetric blind spot
 
-**File:** `src/relay/fetch.rs:107-109` (budget error), `src/relay/fetch.rs:153-157` (stall
-error), `src/relay/fetch.rs:238` (deadline error); `src/error.rs:58-62`
+**File:** `src/relay/fetch.rs:122`, `:161-172`
 
-**Issue:** `RelayError::FetchTimeout(String)` is reused for three distinct failure modes:
-page-budget exceeded (budget error), boundary-second stall (stall error), and elapsed-time
-timeout (deadline error). A caller matching on `FetchTimeout` cannot distinguish these
-without parsing the message string. Future callers may want to handle them differently:
-a timeout might warrant a backoff-before-retry, a stall might warrant an immediate retry
-with a single-author chunk to drain the boundary second, and a budget overrun might warrant
-operator alerting. The plan sanctioned this reuse ("existing requeue semantics already
-match"), but the conflation reduces future extensibility.
+**Issue:** The detector only fires when `page_back(...) == Some(current_until)`,
+i.e. `oldest == current_until`. A relay that re-serves a capped page whose
+`oldest` is OLDER than `current_until` but contributes zero new ids (echoing an
+already-seen older page) makes the condition false, so the loop `break`s with
+`Ok` at line 172 — even though `returned >= cap` signals the relay may still be
+truncating. This is the symmetric counterpart to the stall 02-12 fixed: the
+"pinned at current_until" stall is now caught, but a "re-served older capped
+page, zero new" window still completes silently. An adversary controls `oldest`,
+so the zero-new-id `break` is not unconditionally safe. This is narrower than
+WR-01 and likely out of scope for 02-12, but it means the genuine-exhaustion
+escape hatch (comment lines 154-160) rests on the assumption that a zero-new-id
+capped window that "advanced" is honest — which is not enforced.
 
-**Fix:** Consider a dedicated `BoundaryStall(String)` variant (as the plan noted as an
-option) and a `PageBudgetExceeded(String)` variant alongside `FetchTimeout`. No urgency —
-the current semantics are correct for the requeue path.
+**Fix:** Consider treating ANY `returned >= cap && new_ids == 0` window as a
+requeue (the `MAX_PAGES_PER_CHUNK` budget already bounds the loop, so this
+cannot spin). If that is too aggressive for honest relays, document why an
+older-page echo is assumed impossible.
 
----
+### IN-02: `MAX_PAGES_PER_CHUNK` worst-case `out` figure is cap-dependent, stated as a constant
 
-### IN-02: `prefix_for_until_fetch_fn` sort relies on stable ordering but documents it as "stable-ish"
+**File:** `src/relay/fetch.rs:43-47`
 
-**File:** `tests/mock_relay/mod.rs:137`
+**Issue:** The doc states worst-case `out` is `MAX_PAGES_PER_CHUNK * cap` ≈ 5M
+events, which assumes `cap == 500` (the DEFAULT_MAX_LIMIT ceiling). The budget
+guard runs at the top of the loop before the fetch and `pages` is incremented
+after (line 120), so the loop performs exactly `MAX_PAGES_PER_CHUNK` fetches
+before tripping — confirmed by `budget_guard_errors_on_adversarial_relay`
+asserting `untils().len() == MAX_PAGES_PER_CHUNK` (tests/pagination.rs:170-174).
+The magnitude is correct, but the 5M figure reads as a fixed constant when it
+scales with the relay's actual `max_limit`.
 
-**Issue:** The sort `sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at))` is stable
-(Rust's `slice::sort_by` is guaranteed stable). The companion test comment in
-`tests/pagination.rs:190` says "created_at ties at T are broken by the sort's stable-ish
-order." The word "stable-ish" understates the guarantee — the ordering is deterministic
-and guaranteed by the language. A future maintainer reading "stable-ish" might add a
-secondary sort key (e.g. by `event.id`) that changes which events fall in the cap-2 prefix
-for `until=T`, potentially breaking the stall test's invariant (the test requires C(T)
-to remain outside the cap-2 prefix).
-
-**Fix:** Replace "stable-ish" with "stable (Rust sort_by is guaranteed stable)" and note
-explicitly which two events appear in the prefix (A, B) and which is excluded (C), so the
-constraint is clear to maintainers.
-
----
-
-### IN-03: `gated_pagination_throttles_each_window` comment claims "two capped windows" but the setup has one
-
-**File:** `tests/production_wiring.rs:42-43`
-
-**Issue:** The test comment says "Two CAPPED windows then a short one, so paginate pages back
-and issues >= 3 REQs." In reality the scripted relay has exactly two windows: `w1` (capped,
-== cap) and `w2` (short, < cap). This produces exactly two REQs — not three. The comment
-overstates the scenario by one window and one REQ, which may mislead future maintainers
-about the test's coverage.
-
-**Fix:** Update the comment to read "One capped window then a short one, so paginate pages
-back and issues exactly 2 REQs."
+**Fix:** Reword to "≈ `MAX_PAGES_PER_CHUNK * relay_max_limit` (≤ ~5M at the
+500-cap ceiling)" to avoid implying a fixed 5M regardless of cap.
 
 ---
 
-_Reviewed: 2026-06-13T08:05:00Z_
+_Reviewed: 2026-06-13T09:00:00Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
