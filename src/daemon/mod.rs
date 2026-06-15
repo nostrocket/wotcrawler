@@ -45,7 +45,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
 
-use nostr_sdk::{Kind, PublicKey, Timestamp};
+use nostr_sdk::{Kind, PublicKey};
 use tokio_util::sync::CancellationToken;
 
 use crate::daemon::config::Config;
@@ -252,7 +252,6 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
                 batch_size,
                 concurrency,
                 WANT_KIND,
-                Timestamp::now(),
                 FUTURE_CLAMP_SECS,
                 FOLLOW_CAP,
                 max_attempts,

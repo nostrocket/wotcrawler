@@ -68,7 +68,6 @@ pub async fn run_daemon_loop<F, Fut>(
     batch_size: i64,
     concurrency: usize,
     want_kind: Kind,
-    now: Timestamp,
     future_clamp_secs: u64,
     follow_cap: usize,
     max_attempts: i16,
@@ -143,6 +142,14 @@ where
             // spawned future runs to completion — NEVER aborted by cancellation
             // (Pitfall 4 / T-04-09: an aborted apply_follow_list would half-commit).
             let _permit = permit;
+            // Capture a FRESH wall-clock per batch (CR-01): the terminal stamps
+            // written by `set_fetch_status` (not_found) and `requeue_or_fail`
+            // (failed) derive `last_fetched_at` from this `now`. A single snapshot
+            // taken once at daemon spawn would freeze `last_fetched_at` at the
+            // start time, immediately re-enqueueing every not_found/failed row on
+            // the next staleness scan and defeating FRESH-02. The success path
+            // (`apply_follow_list`) uses SQL `now()` and is unaffected.
+            let now = Timestamp::now();
             let fut = fetch_union(batch.clone());
             process_batch(
                 &pool,
