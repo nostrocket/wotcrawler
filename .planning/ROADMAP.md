@@ -172,7 +172,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 2** *(blocked on 05-01 + 05-02; wires fallback into process_batch)*
 
-  - [ ] 05-03-PLAN.md — NIP-65 fallback at the not_found arm: injected fallback_fetch closure, on-demand kind:10002 resolve+persist, health-ordered write-relay selection, re-validate via acquire_validated_lists, nip65_recovered counter (RELAY-05)
+  - [x] 05-03-PLAN.md — NIP-65 fallback at the not_found arm: injected fallback_fetch closure, on-demand kind:10002 resolve+persist, health-ordered write-relay selection, re-validate via acquire_validated_lists, nip65_recovered counter (RELAY-05)
 
 **Wave 3** *(blocked on 05-02 + 05-03; the only routing site)*
 
@@ -189,4 +189,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Relay Acquisition & Validation | 12/12 | Complete    | 2026-06-13 |
 | 3. Graph Writer & BFS Frontier | 3/3 | Complete    | 2026-06-13 |
 | 4. Daemon, Staleness Loop & Observability | 5/5 | Complete    | 2026-06-15 |
-| 5. NIP-65 Outbox Routing & Relay Health | 2/4 | In Progress|  |
+| 5. NIP-65 Outbox Routing & Relay Health | 3/4 | In Progress|  |

@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-06-15T09:55:36.992Z"
+last_updated: "2026-06-15T10:05:23.747Z"
 last_activity: 2026-06-15 -- Phase 5 execution started
 progress:
   total_phases: 5
   completed_phases: 4
   total_plans: 27
-  completed_plans: 25
+  completed_plans: 26
   percent: 80
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 ## Current Position
 
 Phase: 5 (nip-65-outbox-routing-relay-health) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-06-15 -- Phase 5 execution started
 
@@ -80,6 +80,7 @@ Progress: [████░░░░░░] 40% (2/5 phases)
 | Phase 04 P05 | 6min | 2 tasks | 2 files |
 | Phase 05 P01 | 50min | 4 tasks | 10 files |
 | Phase 05 P02 | 6min | 3 tasks | 7 files |
+| Phase 05 P03 | 22min | 2 tasks tasks | 6 files files |
 
 ## Accumulated Context
 
@@ -122,6 +123,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [04-05] Per-batch ingest literals (Kind::ContactList, future_clamp 3600s, follow_cap 10000, max_authors=DEFAULT_MAX_LIMIT) are local consts in daemon/mod.rs (no config field); values mirror the Phase 3 crawl tests.
 - [Phase ?]: [04-05] Graceful shutdown: signal -> shared CancellationToken; loop stops claiming and drains in-flight workers to terminal status (zero orphaned in_progress); axum with_graceful_shutdown + all tasks joined under a bounded SHUTDOWN_TIMEOUT (Pitfall 8). Verified live: SIGTERM drained the claimed lease to terminal not_found, 0 in_progress remaining.
 - [Phase ?]: RelayHealthRegistry is parallel to RateLimiterRegistry (rate_limit.rs untouched); only RateLimited notices degrade health; permits floor at 1
+- [Phase ?]: [05-03] RELAY-05 fallback wired at process_batch None arm via injected fallback_fetch + relay_list_fetch closures (apply.rs stays Client-free); on-demand curated kind:10002 resolve+persist is the sole persist-on-winner hook; a failed kind:10002 fetch does NOT consume the kind-3 retry budget (OQ1); recovery counted via nip65_recovered. run_crawl/run_daemon_loop pass fallback_enabled=false + no-op closures — live health-driven wiring is 05-04.
 
 ### Pending Todos
 
@@ -142,6 +144,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-15T09:55:17.075Z
+Last session: 2026-06-15T10:05:01.609Z
 Stopped at: Completed 04-01-PLAN.md
 Resume file: None
