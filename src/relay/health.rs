@@ -217,6 +217,7 @@ impl RelayHealthRegistry {
             .expect("health probe map not poisoned")
             .insert(relay.to_string(), Instant::now());
     }
+
 }
 
 /// Run `fetch` under the deadlock-safe per-relay admission gate (RELAY-06,
@@ -253,25 +254,34 @@ where
     F: FnOnce() -> Fut,
     Fut: Future<Output = Result<T, E>>,
 {
+    // (health-scaled admission gate) Wait until the effective, health-scaled slot
+    // count admits this relay BEFORE acquiring the hard semaphore permit (CR-01).
+    // `permits` floors at 1, so a healthy or degraded relay always eventually
+    // admits; a relay at its scaled ceiling sleeps briefly to let an in-flight
+    // fetch finish. NO semaphore permit (and no lock) is held across this loop:
+    // holding the permit while spinning here would let `per_relay_concurrency`
+    // spinners exhaust the semaphore so no in-flight fetch could ever complete to
+    // decrement `in_use` — a live-lock under saturation. A short `sleep` (WR-01)
+    // genuinely yields the worker thread rather than busy re-polling via
+    // `yield_now`, so the tasks whose `InUseGuard` drop unblocks the waiters get
+    // CPU time.
+    loop {
+        if health.in_use(relay) < health.permits(relay, per_relay_concurrency) as u32 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+
     // (per-relay permit) The fixed-size semaphore bounds the hard ceiling; it is
-    // acquired AFTER the caller's global crawl permit and BEFORE the GCRA token
-    // inside `fetch` (deadlock-safe order). The permit is released when `_permit`
+    // acquired AFTER the caller's global crawl permit and the in-use admission
+    // check above, and BEFORE the GCRA token inside `fetch` (deadlock-safe order).
+    // It is held only for the fetch, never across the admission loop, so a spinner
+    // can never starve an in-flight fetch from completing. Released when `_permit`
     // drops at end of scope.
     let _permit = sem
         .acquire()
         .await
         .expect("per-relay semaphore is never closed");
-
-    // (health-scaled admission gate) Spin until the effective, health-scaled slot
-    // count admits this relay. `permits` floors at 1, so a healthy or degraded
-    // relay always eventually admits; a relay at its scaled ceiling yields to let
-    // an in-flight fetch finish. No lock is held across the await.
-    loop {
-        if health.in_use(relay) < health.permits(relay, per_relay_concurrency) as u32 {
-            break;
-        }
-        tokio::task::yield_now().await;
-    }
 
     health.incr_in_use(relay);
     // Decrement on EVERY exit path (success OR error) — a drop guard so an early
