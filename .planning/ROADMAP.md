@@ -146,7 +146,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 3** *(blocked on Wave 2)*
 
-  - [ ] 04-04-PLAN.md — run_daemon_loop (continuous cancellation-aware crawl) + sampler (gauges/progress/staleness/reclaim timers) + FRESH-03 churn-on-change test (FRESH-02, FRESH-03, OBS-04, OPS-02)
+  - [x] 04-04-PLAN.md — run_daemon_loop (continuous cancellation-aware crawl) + sampler (gauges/progress/staleness/reclaim timers) + FRESH-03 churn-on-change test (FRESH-02, FRESH-03, OBS-04, OPS-02)
 
 **Wave 4** *(blocked on Wave 3; wires everything into the binary)*
 
@@ -173,5 +173,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 1. Schema & Data Contract | 3/3 | Complete   | 2026-06-12 |
 | 2. Relay Acquisition & Validation | 12/12 | Complete    | 2026-06-13 |
 | 3. Graph Writer & BFS Frontier | 3/3 | Complete    | 2026-06-13 |
-| 4. Daemon, Staleness Loop & Observability | 3/5 | In Progress|  |
+| 4. Daemon, Staleness Loop & Observability | 4/5 | In Progress|  |
 | 5. NIP-65 Outbox Routing & Relay Health | 0/TBD | Not started | - |

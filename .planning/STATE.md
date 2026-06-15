@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-06-15T04:25:08.956Z"
+last_updated: "2026-06-15T04:34:56.257Z"
 last_activity: 2026-06-15 -- Phase 4 execution started
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 23
-  completed_plans: 21
+  completed_plans: 22
   percent: 60
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 ## Current Position
 
 Phase: 4 (daemon-staleness-loop-observability) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-06-15 -- Phase 4 execution started
 
@@ -75,6 +75,7 @@ Progress: [████░░░░░░] 40% (2/5 phases)
 | Phase 04 P01 | 24 | 3 tasks | 14 files |
 | Phase 04 P02 | 9 | 2 tasks | 6 files |
 | Phase 04 P03 | 5 | 2 tasks | 6 files |
+| Phase 04 P04 | 21 | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -111,6 +112,8 @@ Recent decisions affecting current work:
 - [Phase ?]: 04-02: PublicKey::parse (nostr 0.44.3) accepts hex+bech32; no from_hex/from_bech32 fallback
 - [Phase ?]: Observability metric names locked: frontier_depth, crawl_coverage_ratio, fetch_duration_seconds, staleness_age_seconds, relay_consecutive_failures, relay_active_count (04-03)
 - [Phase ?]: /metrics rendered from the shared axum server via PrometheusHandle::render() — no http-listener second hyper server (04-03)
+- [Phase ?]: run_daemon_loop reuses run_crawl primitives verbatim; only loop control is new (idle-poll + claim-boundary cancel drain)
+- [Phase ?]: Sampler gauges are aggregate-only on a coarse interval; relay-health gauge is the MAX failure count across the curated set
 
 ### Pending Todos
 
@@ -131,6 +134,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-15T04:24:41.281Z
+Last session: 2026-06-15T04:34:38.687Z
 Stopped at: Completed 04-01-PLAN.md
 Resume file: None
