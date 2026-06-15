@@ -168,7 +168,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Wave 1** *(disjoint file-sets, run in parallel)*
 
   - [x] 05-01-PLAN.md — Migration 0004 pubkey_relays + ValidatedRelayList + nip65 r-tag extraction + apply_relay_list/lookup_write_relays + URL-aware/error-injecting ScriptedGraph seam + nip65_fallback scaffold (RELAY-05)
-  - [ ] 05-02-PLAN.md — RelayHealthRegistry (EWMA score/permits/probe) + rate-limit-hit capture in NOTICE consumer + 5 new config fields with fail-fast validation (RELAY-06)
+  - [x] 05-02-PLAN.md — RelayHealthRegistry (EWMA score/permits/probe) + rate-limit-hit capture in NOTICE consumer + 5 new config fields with fail-fast validation (RELAY-06)
 
 **Wave 2** *(blocked on 05-01 + 05-02; wires fallback into process_batch)*
 
@@ -189,4 +189,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Relay Acquisition & Validation | 12/12 | Complete    | 2026-06-13 |
 | 3. Graph Writer & BFS Frontier | 3/3 | Complete    | 2026-06-13 |
 | 4. Daemon, Staleness Loop & Observability | 5/5 | Complete    | 2026-06-15 |
-| 5. NIP-65 Outbox Routing & Relay Health | 1/4 | In Progress|  |
+| 5. NIP-65 Outbox Routing & Relay Health | 2/4 | In Progress|  |

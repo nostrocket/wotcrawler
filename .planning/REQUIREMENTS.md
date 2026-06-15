@@ -22,7 +22,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **RELAY-03**: Fetches paginate (`until` windows, author chunking) and never treat EOSE as proof of completeness
 - [x] **RELAY-04**: Per-relay rate limiting keeps request rates polite; rate-limited notices trigger backoff
 - [x] **RELAY-05**: When a pubkey's kind 3 isn't found on curated relays, the crawler falls back to that pubkey's NIP-65 write relays
-- [ ] **RELAY-06**: Each relay carries a health score derived from observed behavior (connect failures, timeouts, rate-limit hits, response latency) that drives routing and per-relay concurrency
+- [x] **RELAY-06**: Each relay carries a health score derived from observed behavior (connect failures, timeouts, rate-limit hits, response latency) that drives routing and per-relay concurrency
 
 ### Graph Storage
 
@@ -99,7 +99,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | RELAY-03 | Phase 2 | Complete |
 | RELAY-04 | Phase 2 | Complete |
 | RELAY-05 | Phase 5 | Complete |
-| RELAY-06 | Phase 5 | Pending |
+| RELAY-06 | Phase 5 | Complete |
 | GRAPH-01 | Phase 1 | Complete |
 | GRAPH-02 | Phase 3 | Complete |
 | GRAPH-03 | Phase 1 | Complete |
