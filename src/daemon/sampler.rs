@@ -29,10 +29,11 @@ use tokio_util::sync::CancellationToken;
 
 use crate::crawl::frontier::{reclaim_in_progress_older_than, reclaim_stale_by_ttl};
 use crate::daemon::observe::{
-    METRIC_COVERAGE, METRIC_FRONTIER_DEPTH, METRIC_RELAY_ACTIVE, METRIC_RELAY_FAILURES,
-    METRIC_STALENESS_AGE,
+    METRIC_COVERAGE, METRIC_FRONTIER_DEPTH, METRIC_RELAY_ACTIVE, METRIC_RELAY_CONCURRENCY,
+    METRIC_RELAY_FAILURES, METRIC_RELAY_HEALTH, METRIC_STALENESS_AGE,
 };
 use crate::error::StoreError;
+use crate::relay::health::RelayHealthRegistry;
 use crate::relay::rate_limit::RateLimiterRegistry;
 
 /// A snapshot of the frontier by status, plus the total, from a single
@@ -116,6 +117,7 @@ pub async fn frontier_counts(pool: &PgPool) -> Result<FrontierCounts, StoreError
 pub async fn sample_gauges(
     pool: PgPool,
     registry: Arc<RateLimiterRegistry>,
+    health: Arc<RelayHealthRegistry>,
     relays: Vec<String>,
     token: CancellationToken,
     interval: Duration,
@@ -160,6 +162,17 @@ pub async fn sample_gauges(
             .max()
             .unwrap_or(0);
         metrics::gauge!(METRIC_RELAY_FAILURES).set(max_failures as f64);
+
+        // RELAY-06: labeled per-relay health + concurrency-in-use gauges, emitted
+        // ONLY over the BOUNDED curated `relays` set. Transient NIP-65 write relays
+        // are deliberately NOT exported per-URL — an unbounded `relay` label set
+        // would be a cardinality/metric DoS (Pitfall 7); their health stays
+        // in-memory for routing only.
+        for r in &relays {
+            metrics::gauge!(METRIC_RELAY_HEALTH, "relay" => r.clone()).set(health.score(r));
+            metrics::gauge!(METRIC_RELAY_CONCURRENCY, "relay" => r.clone())
+                .set(health.in_use(r) as f64);
+        }
     }
 }
 

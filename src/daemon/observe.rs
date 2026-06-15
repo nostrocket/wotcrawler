@@ -72,6 +72,26 @@ pub const METRIC_RELAY_FAILURES: &str = "relay_consecutive_failures";
 /// [`crate::relay::rate_limit::RateLimiterRegistry::active_relay_count`].
 pub const METRIC_RELAY_ACTIVE: &str = "relay_active_count";
 
+/// Gauge (LABELED by `relay`): per-relay EWMA health score in `[0, 1]`, emitted
+/// ONLY over the BOUNDED curated relay set (RELAY-06). Transient NIP-65 write
+/// relays are tracked in-memory for routing but NEVER exported per-URL — an
+/// unbounded label set would be a cardinality/metric DoS (Pitfall 7). Source:
+/// [`crate::relay::health::RelayHealthRegistry::score`].
+pub const METRIC_RELAY_HEALTH: &str = "relay_health";
+
+/// Counter NAME for NIP-65 write-relay recoveries (RELAY-05/06). Fired
+/// UN-SUFFIXED at the `crate::crawl::apply` recovery site as
+/// `metrics::counter!("nip65_recovered")`; the Prometheus exporter appends
+/// `_total`, so it appears in exposition / Grafana PromQL as
+/// `nip65_recovered_total`. This const is the single-source-of-truth name.
+pub const METRIC_NIP65_RECOVERED: &str = "nip65_recovered";
+
+/// Gauge (LABELED by `relay`): per-relay concurrency-in-use, emitted ONLY over
+/// the BOUNDED curated relay set (RELAY-06; same cardinality bound as
+/// [`METRIC_RELAY_HEALTH`]). Source:
+/// [`crate::relay::health::RelayHealthRegistry::in_use`].
+pub const METRIC_RELAY_CONCURRENCY: &str = "relay_concurrency_in_use";
+
 /// Latency buckets (seconds) for the per-batch fetch-duration histogram.
 const FETCH_DURATION_BUCKETS: &[f64] = &[0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0];
 

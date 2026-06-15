@@ -438,11 +438,12 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
     let sampler_task = {
         let pool = pool.clone();
         let registry = Arc::clone(&registry);
+        let health = Arc::clone(&health);
         let relays = cfg.relays.clone();
         let token = token.clone();
         let interval = cfg.progress_interval;
         tokio::spawn(async move {
-            sampler::sample_gauges(pool, registry, relays, token, interval).await
+            sampler::sample_gauges(pool, registry, health, relays, token, interval).await
         })
     };
 
