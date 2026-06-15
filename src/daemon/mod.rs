@@ -307,8 +307,27 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
     // `run_daemon_loop`). These own the ONLY references to the live `Client` so
     // the crawl layer (`crawl/apply.rs`) stays Client-free (no circular dep,
     // ScriptedGraph-testable). They reuse the SAME GCRA-gated per-relay fetch path
-    // as the fan-out; they do NOT duplicate the health routing/admission of the
-    // fan-out (the fan-out is the only routing site).
+    // as the fan-out AND (CR-03) the SAME per-relay concurrency admission gate
+    // (`admit_per_relay`), so write-relay fallbacks are concurrency-capped and
+    // health-observed exactly like the fan-out instead of issuing unbounded
+    // concurrent requests to a degraded write relay.
+    //
+    // CR-03: NIP-65 write relays are arbitrary URLs, not the curated set, so they
+    // have no entry in `per_relay_sems`. A shared, on-demand
+    // `HashMap<String, Arc<Semaphore>>` (one fixed-size `Semaphore::new(
+    // per_relay_concurrency)` per write-relay URL, created on first use) gives
+    // each write relay an in_use/concurrency cap without panicking on a missing
+    // curated entry. Note (per CR-03): the LABELED health gauge stays restricted
+    // to the curated set (no unbounded gauge cardinality); only the admission
+    // gate / `in_use` bookkeeping is keyed by arbitrary URL here.
+    //
+    // DEADLOCK-SAFE ORDER is preserved: the fallback closures run inside
+    // `process_batch`, inside the spawned batch task that already holds the global
+    // crawl permit (loop_.rs), so the order is still
+    //   global crawl permit (held) -> per-relay permit (admit_per_relay)
+    //     -> GCRA token (inside fetch_complete_with_timeout) -> fetch.
+    let fallback_sems: Arc<std::sync::Mutex<HashMap<String, Arc<Semaphore>>>> =
+        Arc::new(std::sync::Mutex::new(HashMap::new()));
 
     // `fallback_fetch(author, write_relays)`: fetch kind-3 for one author from its
     // NIP-65 write relays, concatenating the raw events for one single-author
@@ -317,25 +336,49 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
         let client = client.clone();
         let registry = Arc::clone(&registry);
         let limit_cache = Arc::clone(&limit_cache);
+        let health = Arc::clone(&health);
+        let fallback_sems = Arc::clone(&fallback_sems);
         let fetch_timeout = cfg.fetch_timeout;
+        let per_relay_concurrency = cfg.per_relay_concurrency;
         move |author: PublicKey, write_relays: Vec<String>| {
             let client = client.clone();
             let registry = Arc::clone(&registry);
             let limit_cache = Arc::clone(&limit_cache);
+            let health = Arc::clone(&health);
+            let fallback_sems = Arc::clone(&fallback_sems);
             async move {
                 let authors = [author];
                 let mut union: Vec<nostr_sdk::Event> = Vec::new();
                 for relay_url in &write_relays {
                     let max_limit = limit_cache.get_or_fetch(relay_url).await.max_limit;
-                    let events = fetch::fetch_complete_with_timeout(
-                        &client,
+                    // CR-03: get-or-create this write relay's fixed-size per-URL
+                    // semaphore, then admit through the SAME per-relay gate the
+                    // fan-out uses (concurrency cap + health-scaled in_use).
+                    let sem = {
+                        let mut map = fallback_sems
+                            .lock()
+                            .expect("fallback semaphore map not poisoned");
+                        Arc::clone(map.entry(relay_url.clone()).or_insert_with(|| {
+                            Arc::new(Semaphore::new(per_relay_concurrency))
+                        }))
+                    };
+                    let events = crate::relay::health::admit_per_relay(
+                        &health,
+                        &sem,
                         relay_url,
-                        &authors,
-                        WANT_KIND,
-                        max_limit,
-                        MAX_AUTHORS_PER_REQ,
-                        fetch_timeout,
-                        &registry,
+                        per_relay_concurrency,
+                        || {
+                            fetch::fetch_complete_with_timeout(
+                                &client,
+                                relay_url,
+                                &authors,
+                                WANT_KIND,
+                                max_limit,
+                                MAX_AUTHORS_PER_REQ,
+                                fetch_timeout,
+                                &registry,
+                            )
+                        },
                     )
                     .await?;
                     union.extend(events);
@@ -353,26 +396,57 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
         let relays = cfg.relays.clone();
         let registry = Arc::clone(&registry);
         let limit_cache = Arc::clone(&limit_cache);
+        let health = Arc::clone(&health);
+        let per_relay_sems = Arc::clone(&per_relay_sems);
+        let fallback_sems = Arc::clone(&fallback_sems);
         let fetch_timeout = cfg.fetch_timeout;
+        let per_relay_concurrency = cfg.per_relay_concurrency;
         move |author: PublicKey| {
             let client = client.clone();
             let relays = relays.clone();
             let registry = Arc::clone(&registry);
             let limit_cache = Arc::clone(&limit_cache);
+            let health = Arc::clone(&health);
+            let per_relay_sems = Arc::clone(&per_relay_sems);
+            let fallback_sems = Arc::clone(&fallback_sems);
             async move {
                 let authors = [author];
                 let mut union: Vec<nostr_sdk::Event> = Vec::new();
                 for relay_url in &relays {
                     let max_limit = limit_cache.get_or_fetch(relay_url).await.max_limit;
-                    let events = fetch::fetch_complete_with_timeout(
-                        &client,
+                    // CR-03: gate this curated kind:10002 fetch through the SAME
+                    // per-relay admission gate as the fan-out. Curated relays have
+                    // a fixed semaphore in `per_relay_sems`; fall back to the
+                    // on-demand map for any URL not in the curated set so the gate
+                    // never panics on a missing entry.
+                    let sem = match per_relay_sems.get(relay_url) {
+                        Some(s) => Arc::clone(s),
+                        None => {
+                            let mut map = fallback_sems
+                                .lock()
+                                .expect("fallback semaphore map not poisoned");
+                            Arc::clone(map.entry(relay_url.clone()).or_insert_with(|| {
+                                Arc::new(Semaphore::new(per_relay_concurrency))
+                            }))
+                        }
+                    };
+                    let events = crate::relay::health::admit_per_relay(
+                        &health,
+                        &sem,
                         relay_url,
-                        &authors,
-                        Kind::RelayList,
-                        max_limit,
-                        MAX_AUTHORS_PER_REQ,
-                        fetch_timeout,
-                        &registry,
+                        per_relay_concurrency,
+                        || {
+                            fetch::fetch_complete_with_timeout(
+                                &client,
+                                relay_url,
+                                &authors,
+                                Kind::RelayList,
+                                max_limit,
+                                MAX_AUTHORS_PER_REQ,
+                                fetch_timeout,
+                                &registry,
+                            )
+                        },
                     )
                     .await?;
                     union.extend(events);
