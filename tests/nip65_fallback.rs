@@ -428,7 +428,6 @@ async fn no_deadlock_single_permit() {
         let registry = Arc::clone(&registry);
         let global = Arc::clone(&global);
         let relay_fetch = graph.relay_fetch_fn();
-        let author = author;
         handles.push(tokio::spawn(async move {
             // (global crawl permit) — held for the whole batch, as in loop_.rs.
             let _g = global.acquire().await.expect("global never closed");
