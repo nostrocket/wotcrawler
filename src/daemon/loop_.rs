@@ -113,13 +113,12 @@ where
 
         let batch = claim_batch(pool, batch_size).await?;
         if batch.is_empty() {
-            // Frontier drained for now. Join in-flight workers first — their
-            // followee upserts may create new `discovered` rows — surfacing the
-            // first error, then idle-poll instead of terminating (this is the ONLY
-            // new control vs run_crawl, FRESH-02 continuous operation).
-            for handle in workers.drain(..) {
-                join_worker(handle).await?;
-            }
+            // Frontier drained for now. Join ALL in-flight workers first — their
+            // followee upserts may create new `discovered` rows. Every handle is
+            // joined before propagating (WR-04): a panicking worker must not drop
+            // the remaining handles' joins (their background writes are still in
+            // flight), so we await all and surface the first error after.
+            drain_all(&mut workers).await?;
             // Idle: sleep the poll interval, but wake immediately on cancellation so
             // shutdown is prompt even on a long idle. Cancel here breaks the loop;
             // the (now empty) worker set drains to a no-op below.
@@ -204,11 +203,13 @@ where
         }
 
         // Graceful drain (OPS-02 / T-04-08): the loop has stopped claiming; join
-        // every remaining in-flight worker so each leased row reaches a terminal
-        // status. Zero orphaned `in_progress` leases remain after this returns.
-        for handle in workers.drain(..) {
-            join_worker(handle).await?;
-        }
+        // EVERY remaining in-flight worker so each leased row reaches a terminal
+        // status. A panicking worker must not short-circuit the join of the others
+        // (WR-04): their process_batch writes are still in flight, and early-return
+        // on the first error would leave those handles detached while reporting a
+        // single error that masks the rest. drain_all awaits all, then surfaces the
+        // first error — preserving the OPS-02 zero-orphan-lease guarantee.
+        drain_all(&mut workers).await?;
 
         Ok(stats)
     }
@@ -220,4 +221,32 @@ where
     loop_alive.store(false, Ordering::Relaxed);
 
     result
+}
+
+/// Join EVERY handle in `workers`, awaiting all of them before returning, and
+/// surface the FIRST error encountered (WR-04).
+///
+/// Unlike a `for handle in workers.drain(..) { join_worker(handle).await?; }`
+/// loop — where a `?` on the first failing handle drops the remaining handles
+/// without joining them — this awaits all handles so no in-flight worker is left
+/// detached when one fails. A dropped `JoinHandle` does not abort its task, so an
+/// early return would let background `process_batch` writes continue silently
+/// while masking the other workers' errors. Draining all of them preserves the
+/// OPS-02 zero-orphan-lease guarantee (every leased row reaches a terminal
+/// status) and reports a deterministic first error.
+async fn drain_all(
+    workers: &mut Vec<tokio::task::JoinHandle<Result<(), StoreError>>>,
+) -> Result<(), StoreError> {
+    let mut first_err: Option<StoreError> = None;
+    for handle in workers.drain(..) {
+        if let Err(e) = join_worker(handle).await {
+            if first_err.is_none() {
+                first_err = Some(e);
+            }
+        }
+    }
+    match first_err {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
