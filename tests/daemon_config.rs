@@ -149,3 +149,45 @@ fn empty_relays_rejected() {
         "error should mention relays, got: {err}"
     );
 }
+
+/// CR-02: `concurrency = 0` is rejected at validate() — `Semaphore::new(0)` would
+/// deadlock the loop forever (it never closes), so this must fail fast at startup.
+#[test]
+fn concurrency_zero_rejected() {
+    let body = format!("{}\nconcurrency = 0\n", minimal_toml());
+    let tmp = TempToml::new(&body);
+    let cfg = load_config(&tmp.stem).expect("config with concurrency=0 deserializes");
+    let err = validate(&cfg).expect_err("concurrency = 0 must fail validation");
+    assert!(
+        err.to_string().contains("concurrency"),
+        "error should mention concurrency, got: {err}"
+    );
+}
+
+/// CR-02: `batch_size = 0` is rejected — a non-positive `LIMIT` is a Postgres
+/// error on the first `claim_batch`, so it must fail fast at startup instead.
+#[test]
+fn batch_size_zero_rejected() {
+    let body = format!("{}\nbatch_size = 0\n", minimal_toml());
+    let tmp = TempToml::new(&body);
+    let cfg = load_config(&tmp.stem).expect("config with batch_size=0 deserializes");
+    let err = validate(&cfg).expect_err("batch_size = 0 must fail validation");
+    assert!(
+        err.to_string().contains("batch_size"),
+        "error should mention batch_size, got: {err}"
+    );
+}
+
+/// CR-02: `reqs_per_second = 0` is rejected in validate() — the check used to fire
+/// late in run() (after DB + relay setup), violating OPS-01 fail-fast.
+#[test]
+fn reqs_per_second_zero_rejected() {
+    let body = format!("{}\nreqs_per_second = 0\n", minimal_toml());
+    let tmp = TempToml::new(&body);
+    let cfg = load_config(&tmp.stem).expect("config with reqs_per_second=0 deserializes");
+    let err = validate(&cfg).expect_err("reqs_per_second = 0 must fail validation");
+    assert!(
+        err.to_string().contains("reqs_per_second"),
+        "error should mention reqs_per_second, got: {err}"
+    );
+}

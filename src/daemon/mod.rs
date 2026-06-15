@@ -155,8 +155,11 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
     // and spawn the notice consumer so rate-limited/blocked notices escalate the
     // SAME per-relay counters the fetch gate consults (RELAY-04).
     let client = connect_curated(&cfg.relays, ReconnectPolicy::crawler_default()).await?;
+    // `reqs_per_second > 0` is guaranteed by `config::validate` (OPS-01 fail-fast,
+    // checked at startup before any DB/relay setup), so this NonZeroU32 build is
+    // infallible here; the expect documents that invariant rather than re-checking.
     let reqs_per_second = std::num::NonZeroU32::new(cfg.reqs_per_second)
-        .ok_or_else(|| anyhow::anyhow!("reqs_per_second must be > 0"))?;
+        .expect("config::validate guarantees reqs_per_second > 0");
     let registry = Arc::new(RateLimiterRegistry::with_params(
         reqs_per_second,
         DEFAULT_BACKOFF_BASE,

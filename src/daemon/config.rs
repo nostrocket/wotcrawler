@@ -181,8 +181,16 @@ pub fn load_config(path: &str) -> anyhow::Result<Config> {
 
 /// Fail-fast semantic validation (OPS-01; threat T-04-04). Returns an
 /// actionable error on a bad anchor pubkey, an empty relay set, an empty /
-/// non-URL-looking `database_url`, or a non-positive TTL — before any crawl
-/// work begins. The authoritative `database_url` check is the `PgPool` connect.
+/// non-URL-looking `database_url`, a non-positive TTL, or a non-positive
+/// `concurrency` / `batch_size` / `reqs_per_second` — before any crawl work
+/// begins. The authoritative `database_url` check is the `PgPool` connect.
+///
+/// The numeric guards matter for fail-fast (OPS-01): `concurrency == 0` makes
+/// `Semaphore::new(0)` deadlock the loop forever (it never closes); a negative
+/// or zero `batch_size` makes the first `claim_batch` `LIMIT` a Postgres error;
+/// and `reqs_per_second == 0` makes the rate-limiter `NonZeroU32` build fail.
+/// All three are checked here so a misconfigured daemon dies at startup with an
+/// actionable message, never after DB/relay/loop setup.
 pub fn validate(c: &Config) -> anyhow::Result<()> {
     // Anchor: accept hex or bech32 `npub` (PublicKey::parse handles both).
     nostr_sdk::PublicKey::parse(&c.anchor_pubkey)
@@ -198,5 +206,10 @@ pub fn validate(c: &Config) -> anyhow::Result<()> {
         c.database_url.contains("://"),
         "database_url must look like a URL (scheme://...)"
     );
+    // Numeric fail-fast guards (OPS-01): each would otherwise hang or crash the
+    // loop after expensive setup rather than at startup.
+    anyhow::ensure!(c.concurrency > 0, "concurrency must be > 0");
+    anyhow::ensure!(c.batch_size > 0, "batch_size must be > 0");
+    anyhow::ensure!(c.reqs_per_second > 0, "reqs_per_second must be > 0");
     Ok(())
 }
