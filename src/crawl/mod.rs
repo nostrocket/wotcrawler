@@ -61,7 +61,7 @@ pub const DEFAULT_MAX_ATTEMPTS: i16 = 3;
 use std::future::Future;
 use std::sync::Arc;
 
-use nostr_sdk::{Event, Kind, Timestamp};
+use nostr_sdk::{Event, Kind, PublicKey, Timestamp};
 use sqlx::PgPool;
 use tokio::sync::Semaphore;
 
@@ -70,6 +70,7 @@ use crate::crawl::frontier::{
     claim_batch, reclaim_stale_on_startup, seed_anchor, ClaimedAuthor,
 };
 use crate::error::{RelayError, StoreError};
+use crate::relay::health::RelayHealthRegistry;
 
 /// Outcome of a crawl run: how many batches/authors were processed and how many
 /// orphaned `in_progress` leases were reclaimed at startup. Used for crawl
@@ -142,6 +143,16 @@ where
     let sem = Arc::new(Semaphore::new(concurrency));
     let mut workers: Vec<tokio::task::JoinHandle<Result<(), StoreError>>> = Vec::new();
 
+    // The Phase-3 deterministic crawl driver does NOT exercise the RELAY-05
+    // NIP-65 write-relay fallback (that production wiring — health-driven fan-out
+    // + live fallback closures — lands with the daemon in 05-04). Pass
+    // `fallback_enabled = false` with a fresh empty health registry and no-op
+    // fallback closures so behavior is unchanged here; `process_batch` skips the
+    // fallback path entirely.
+    let health = Arc::new(RelayHealthRegistry::new(
+        crate::relay::health::DEFAULT_HEALTH_ALPHA,
+    ));
+
     loop {
         let batch = claim_batch(pool, batch_size).await?;
         if batch.is_empty() {
@@ -172,6 +183,7 @@ where
 
         let pool = pool.clone();
         let fetch_union = fetch_union.clone();
+        let health = Arc::clone(&health);
         let handle = tokio::spawn(async move {
             // Hold the permit for the whole batch; dropping it on completion frees
             // a slot for the next claim.
@@ -185,7 +197,13 @@ where
                 future_clamp_secs,
                 follow_cap,
                 max_attempts,
+                false, // fallback disabled in the Phase-3 deterministic driver
+                crate::relay::health::DEFAULT_NIP65_MAX_WRITE_RELAYS,
+                &health,
                 || fut,
+                // No-op fallback closures (never invoked when fallback disabled).
+                |_pk: PublicKey, _relays: Vec<String>| std::future::ready(Ok(Vec::new())),
+                |_pk: PublicKey| std::future::ready(Ok(Vec::new())),
             )
             .await
             .map(|_applied| ())

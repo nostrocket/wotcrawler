@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use nostr_sdk::{Event, Kind, Timestamp};
+use nostr_sdk::{Event, Kind, PublicKey, Timestamp};
 use sqlx::PgPool;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
@@ -38,6 +38,7 @@ use crate::crawl::apply::process_batch;
 use crate::crawl::frontier::{claim_batch, reclaim_stale_on_startup, seed_anchor, ClaimedAuthor};
 use crate::crawl::{join_worker, CrawlStats};
 use crate::error::{RelayError, StoreError};
+use crate::relay::health::RelayHealthRegistry;
 
 /// Drive the continuous, cancellation-aware crawl loop (OPS-02 / FRESH-02).
 ///
@@ -98,6 +99,16 @@ where
     let sem = Arc::new(Semaphore::new(concurrency));
     let mut workers: Vec<tokio::task::JoinHandle<Result<(), StoreError>>> = Vec::new();
 
+    // RELAY-05 NIP-65 write-relay fallback wiring (live fallback closures sourced
+    // from the connected Client + the daemon's health registry, plus the config
+    // toggle/cap) lands with the health-driven fan-out in 05-04. For now the loop
+    // passes `fallback_enabled = false` with a fresh empty health registry and
+    // no-op fallback closures so `process_batch` skips the fallback path and the
+    // production loop behaves exactly as before.
+    let health = Arc::new(RelayHealthRegistry::new(
+        crate::relay::health::DEFAULT_HEALTH_ALPHA,
+    ));
+
     // Run the loop + drain in an inner block so `loop_alive` is flipped back to
     // `false` on EVERY exit — clean shutdown OR an early `?` error (WR-03 / OBS-03:
     // `/health/ready` returns 200 only while the loop is genuinely alive). Without
@@ -141,6 +152,7 @@ where
 
         let pool = pool.clone();
         let fetch_union = fetch_union.clone();
+        let health = Arc::clone(&health);
         let handle = tokio::spawn(async move {
             // Hold the permit for the whole batch; dropping it frees a slot. The
             // spawned future runs to completion — NEVER aborted by cancellation
@@ -177,7 +189,13 @@ where
                 future_clamp_secs,
                 follow_cap,
                 max_attempts,
+                false, // fallback wiring lands in 05-04
+                crate::relay::health::DEFAULT_NIP65_MAX_WRITE_RELAYS,
+                &health,
                 || fetch_timed,
+                // No-op fallback closures (never invoked when fallback disabled).
+                |_pk: PublicKey, _relays: Vec<String>| std::future::ready(Ok(Vec::new())),
+                |_pk: PublicKey| std::future::ready(Ok(Vec::new())),
             )
             .await
             .map(|_applied| ())
