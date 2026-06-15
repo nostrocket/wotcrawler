@@ -220,7 +220,7 @@ pub async fn progress_summary(pool: PgPool, token: CancellationToken, interval: 
 /// Periodically re-enqueue stale terminal rows into the frontier (FRESH-02).
 ///
 /// Calls [`reclaim_stale_by_ttl`] every `interval`, increments a
-/// `staleness_reenqueued_total` counter by the number re-enqueued, and logs the
+/// `staleness_reenqueued` counter by the number re-enqueued, and logs the
 /// sweep result. Stops on `token.cancelled()`. `ttl_secs` is the uniform staleness
 /// TTL: rows whose `last_fetched_at` is older are flipped back to `discovered`.
 pub async fn staleness_timer(
@@ -238,7 +238,10 @@ pub async fn staleness_timer(
 
         match reclaim_stale_by_ttl(&pool, ttl_secs).await {
             Ok(n) => {
-                metrics::counter!("staleness_reenqueued_total").increment(n);
+                // Name WITHOUT a manual `_total`: metrics-exporter-prometheus
+                // appends `_total` to counters in exposition, so this exports as
+                // `staleness_reenqueued_total` (WR-02 — avoids the doubled suffix).
+                metrics::counter!("staleness_reenqueued").increment(n);
                 tracing::info!(reenqueued = n, ttl_secs, "staleness scan re-enqueued stale rows");
             }
             Err(e) => tracing::warn!(error = %e, "staleness scan failed"),
@@ -251,7 +254,7 @@ pub async fn staleness_timer(
 /// Calls [`reclaim_in_progress_older_than`] every `interval`; the `age_secs`
 /// threshold is set comfortably above the fetch timeout so a freshly-claimed live
 /// lease is NEVER reset out from under an in-flight fetch (T-04-02). Increments an
-/// `in_run_reclaimed_total` counter and logs the result. Stops on
+/// `in_run_reclaimed` counter and logs the result. Stops on
 /// `token.cancelled()`.
 pub async fn in_run_reclaim_timer(
     pool: PgPool,
@@ -268,7 +271,9 @@ pub async fn in_run_reclaim_timer(
 
         match reclaim_in_progress_older_than(&pool, age_secs).await {
             Ok(n) => {
-                metrics::counter!("in_run_reclaimed_total").increment(n);
+                // Name WITHOUT a manual `_total`: the exporter appends `_total`,
+                // exporting this as `in_run_reclaimed_total` (WR-02).
+                metrics::counter!("in_run_reclaimed").increment(n);
                 if n > 0 {
                     tracing::info!(reclaimed = n, age_secs, "in-run reclaim reset orphaned leases");
                 }

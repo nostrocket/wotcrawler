@@ -134,13 +134,13 @@
         },
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "sum(rate(relay_rate_limited[5m]))",
+          "expr": "sum(rate(relay_rate_limited_total[5m]))",
           "legendFormat": "rate-limited notices/sec",
           "refId": "C"
         },
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "sum(rate(relay_blocked[5m]))",
+          "expr": "sum(rate(relay_blocked_total[5m]))",
           "legendFormat": "blocked notices/sec",
           "refId": "D"
         }
@@ -157,25 +157,25 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "sum(rate(ingest_invalid_signature[5m]))",
+          "expr": "sum(rate(ingest_invalid_signature_total[5m]))",
           "legendFormat": "invalid signature/sec",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "sum(rate(ingest_unsolicited[5m]))",
+          "expr": "sum(rate(ingest_unsolicited_total[5m]))",
           "legendFormat": "unsolicited/sec",
           "refId": "B"
         },
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "sum(rate(ingest_oversized_follow_list[5m]))",
+          "expr": "sum(rate(ingest_oversized_follow_list_total[5m]))",
           "legendFormat": "oversized follow list/sec",
           "refId": "C"
         },
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "sum(rate(ingest_future_dated[5m]))",
+          "expr": "sum(rate(ingest_future_dated_total[5m]))",
           "legendFormat": "future-dated/sec",
           "refId": "D"
         }
