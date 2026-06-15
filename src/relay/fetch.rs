@@ -26,6 +26,7 @@ use std::time::{Duration, Instant};
 use nostr_sdk::{Client, Event, EventId, Filter, Kind, PublicKey, Timestamp};
 
 use crate::error::RelayError;
+use crate::relay::health::RelayHealthRegistry;
 use crate::relay::rate_limit::RateLimiterRegistry;
 
 /// Default per-fetch deadline (Pitfall 9). Config-overridable later (OPS-01).
@@ -251,6 +252,36 @@ where
         return Err(RelayError::FetchTimeout(relay_url.to_string()));
     }
     Ok(events)
+}
+
+/// Record a per-relay fetch outcome into the [`RelayHealthRegistry`] (RELAY-06).
+///
+/// This is the single classification point for the per-relay fetch Ok/Err arms,
+/// keeping the [`RelayError`]-variant → health-signal mapping (RESEARCH A4) in
+/// the relay layer that owns those variants. The daemon fan-out (05-04) calls
+/// this at its per-relay outcome site with the wall-clock latency it measured
+/// around the fetch; it does NOT change pagination, timeout, or GCRA behavior.
+///
+/// Mapping (RESEARCH A4): a successful fetch records its latency (a fast success
+/// is ~1.0, a slow one drags toward 0.5); [`RelayError::FetchTimeout`] records a
+/// timeout (sample 0.0); every other error — including
+/// [`RelayError::Client`], which wraps connect/subscribe/fetch failures with no
+/// clean per-relay connect-status sampler in nostr-sdk — records a connect
+/// failure (sample 0.0).
+pub fn record_fetch_health(
+    health: &RelayHealthRegistry,
+    relay_url: &str,
+    latency: Duration,
+    outcome: &Result<Vec<Event>, RelayError>,
+) {
+    match outcome {
+        Ok(_) => health.record_success(relay_url, latency),
+        Err(RelayError::FetchTimeout(_)) => health.record_timeout(relay_url),
+        // Client (connect/subscribe/fetch) and any other error map to a
+        // connect-failure: nostr-sdk exposes no clean per-relay connect-status
+        // sampler, so a Client error is treated as the relay failing to serve.
+        Err(_) => health.record_connect_failure(relay_url),
+    }
 }
 
 /// Fetch every stored event of `kind` for `authors` from the connected pool,
