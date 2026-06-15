@@ -162,6 +162,67 @@ async fn same_event_zero_touch() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// FRESH-03: applying a CHANGED follow list (new event id + different followee
+/// set) for the same author bumps `change_count` and advances `last_changed_at`
+/// on every change, while `fetch_count` bumps on every apply. The contrast with
+/// `same_event_zero_touch` (unchanged re-fetch: fetch_count++, change_count flat)
+/// completes the FRESH-03 churn-accounting proof.
+#[tokio::test]
+async fn churn_recorded_on_change() -> anyhow::Result<()> {
+    let (_pg, pool) = fresh_db().await?;
+
+    let follower = common::keys(5);
+    let author = follower.public_key();
+    let a = common::keys(51).public_key();
+    let b = common::keys(52).public_key();
+    let c = common::keys(53).public_key();
+
+    // First list: follow {A, B} at t=1000 (the first change off the zero baseline).
+    let e1 = common::signed_event(&follower, Kind::ContactList, Timestamp::from_secs(1000), &[a, b]);
+    assert!(apply_validated(&pool, &validate_one(e1, author)).await?, "first apply changes");
+
+    let follower_id = upsert_pubkey(&pool, &author.to_bytes()).await?;
+
+    let (fetch1, change1, changed_at1): (i64, i64, Option<chrono::DateTime<chrono::Utc>>) =
+        sqlx::query!(
+            "SELECT fetch_count, change_count, last_changed_at FROM pubkeys WHERE id = $1",
+            follower_id
+        )
+        .fetch_one(&pool)
+        .await
+        .map(|r| (r.fetch_count, r.change_count, r.last_changed_at))?;
+    assert_eq!(fetch1, 1, "fetch_count bumped on first apply");
+    assert_eq!(change1, 1, "change_count bumped on first (changed) apply");
+    let changed_at1 = changed_at1.expect("last_changed_at set on a change");
+
+    // Second list: a DIFFERENT event id with a CHANGED followee set {A, C} at
+    // t=2000 (drop B, add C). This is a real churn event.
+    let e2 = common::signed_event(&follower, Kind::ContactList, Timestamp::from_secs(2000), &[a, c]);
+    assert!(apply_validated(&pool, &validate_one(e2, author)).await?, "changed list reports a change");
+
+    let (fetch2, change2, changed_at2): (i64, i64, Option<chrono::DateTime<chrono::Utc>>) =
+        sqlx::query!(
+            "SELECT fetch_count, change_count, last_changed_at FROM pubkeys WHERE id = $1",
+            follower_id
+        )
+        .fetch_one(&pool)
+        .await
+        .map(|r| (r.fetch_count, r.change_count, r.last_changed_at))?;
+    let changed_at2 = changed_at2.expect("last_changed_at still set");
+
+    // FRESH-03: fetch_count bumps on every apply; change_count bumps on the change;
+    // last_changed_at advances (>=, since now() can collide at second resolution
+    // under a fast test — assert it is not behind the first stamp).
+    assert_eq!(fetch2, 2, "fetch_count bumps on every apply");
+    assert_eq!(change2, 2, "change_count bumped again on the changed re-fetch");
+    assert!(
+        changed_at2 >= changed_at1,
+        "last_changed_at advanced on the change ({changed_at2} >= {changed_at1})"
+    );
+
+    Ok(())
+}
+
 /// GRAPH-02 / INGEST-03 boundary: applying an older then a newer event — and the
 /// reverse order — for one follower both converge on the NEWEST event's edge set.
 /// The ingest gate resolves newest-wins per author over whatever it sees; here we
