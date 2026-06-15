@@ -50,3 +50,6 @@ testcontainers = "0.27.3"
 testcontainers-modules = { version = "0.15.0", features = ["postgres"] }
 # `ServiceExt::oneshot` for in-process axum router tests (tests/observe.rs, 04-03).
 tower = "0.5"
+# Parse + validate the committed Grafana dashboard JSON (tests/observe.rs, 04-03).
+# Already resolved transitively (via config/nostr-sdk); pinned to the locked version.
+serde_json = "1.0.150"
