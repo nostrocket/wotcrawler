@@ -49,6 +49,7 @@ use nostr_sdk::{Kind, PublicKey};
 use tokio_util::sync::CancellationToken;
 
 use crate::daemon::config::Config;
+use crate::relay::health::{RelayHealthRegistry, DEFAULT_HEALTH_ALPHA};
 use crate::relay::nip11::{LimitCache, DEFAULT_MAX_LIMIT};
 use crate::relay::rate_limit::{
     RateLimiterRegistry, DEFAULT_BACKOFF_BASE, DEFAULT_BACKOFF_CAP,
@@ -165,7 +166,14 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
         DEFAULT_BACKOFF_BASE,
         DEFAULT_BACKOFF_CAP,
     ));
-    let _notice_consumer = spawn_notice_consumer(client.clone(), Arc::clone(&registry));
+    // RELAY-06: the parallel per-relay health registry, built once beside the
+    // rate-limiter registry and shared behind an `Arc`. The NOTICE consumer
+    // degrades a relay's health on a `rate-limited` notice; 05-04 extends this
+    // exact `health` binding into the health-driven fan-out + per-relay
+    // concurrency admission (do not rename or duplicate it).
+    let health = Arc::new(RelayHealthRegistry::new(DEFAULT_HEALTH_ALPHA));
+    let _notice_consumer =
+        spawn_notice_consumer(client.clone(), Arc::clone(&registry), Arc::clone(&health));
     let limit_cache = Arc::new(LimitCache::new());
 
     // The closure fans out the RAW fetch per curated relay and CONCATENATES the

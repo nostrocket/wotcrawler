@@ -28,6 +28,7 @@ use nostr_sdk::{Client, Event, Kind, PublicKey, RelayOptions, Timestamp};
 
 use crate::error::RelayError;
 use crate::ingest::{self, ValidatedFollowList};
+use crate::relay::health::RelayHealthRegistry;
 use crate::relay::nip11::LimitCache;
 use crate::relay::rate_limit::{classify_notice, NoticeKind, RateLimiterRegistry};
 
@@ -250,13 +251,30 @@ pub async fn acquire_validated_lists_client(
 ///
 /// Factored out of the spawned consumer so the per-message routing is testable
 /// without a live socket ([`spawn_notice_consumer`] drives it from the stream).
-pub fn handle_relay_message(registry: &RateLimiterRegistry, relay_url: &str, message: &str) {
+///
+/// `health` is the PARALLEL [`RelayHealthRegistry`] (RELAY-06): a
+/// `rate-limited` notice degrades the relay's continuous health score (sample
+/// 0.2 — degrade, not zero) beside the limiter's backoff escalation, so the
+/// same NOTICE that escalates the rate-limiter's per-relay backoff also nudges
+/// the routing/concurrency health signal 05-04 reads. The two registries stay
+/// separate (05-RESEARCH Pitfall 3); this hook is the only contact point.
+pub fn handle_relay_message(
+    registry: &RateLimiterRegistry,
+    health: &RelayHealthRegistry,
+    relay_url: &str,
+    message: &str,
+) {
     match classify_notice(message) {
         // record_notice escalates the failure count, fires the metric, and
         // returns the backoff delay. We do not sleep here — sleeping a shared
         // consumer task would stall every relay's notices; the per-relay
         // failure count is what the fetch path's backoff consults.
-        NoticeKind::RateLimited | NoticeKind::Blocked => {
+        NoticeKind::RateLimited => {
+            let _ = registry.record_notice(relay_url, message);
+            // RELAY-06: degrade the continuous health score (sample 0.2).
+            health.record_rate_limited(relay_url);
+        }
+        NoticeKind::Blocked => {
             let _ = registry.record_notice(relay_url, message);
         }
         NoticeKind::Other => {}
@@ -273,7 +291,10 @@ pub fn handle_relay_message(registry: &RateLimiterRegistry, relay_url: &str, mes
 /// `relay_url` and the machine-readable text of `NOTICE` / `CLOSED` messages,
 /// then delegates to [`handle_relay_message`]. The `registry` is the SAME
 /// `Arc<RateLimiterRegistry>` the fetch path gates on, so a rate-limited notice
-/// for a relay escalates the same per-relay counter the gate consults.
+/// for a relay escalates the same per-relay counter the gate consults; `health`
+/// is the SAME `Arc<RelayHealthRegistry>` the routing/concurrency decisions read
+/// (RELAY-06), so a `rate-limited` notice also degrades that relay's health
+/// score (05-04 consumes it).
 ///
 /// Spawned at acquisition start (alongside [`connect_curated`]); returns the
 /// [`tokio::task::JoinHandle`] so the caller can manage its lifetime. The loop
@@ -281,6 +302,7 @@ pub fn handle_relay_message(registry: &RateLimiterRegistry, relay_url: &str, mes
 pub fn spawn_notice_consumer(
     client: Client,
     registry: Arc<RateLimiterRegistry>,
+    health: Arc<RelayHealthRegistry>,
 ) -> tokio::task::JoinHandle<()> {
     use nostr_sdk::{RelayMessage, RelayPoolNotification};
 
@@ -298,7 +320,7 @@ pub fn spawn_notice_consumer(
                         _ => None,
                     };
                     if let Some(text) = text {
-                        handle_relay_message(&registry, relay_url.as_str(), text);
+                        handle_relay_message(&registry, &health, relay_url.as_str(), text);
                     }
                 }
                 Ok(RelayPoolNotification::Shutdown) => break,

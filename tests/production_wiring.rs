@@ -26,6 +26,7 @@ use std::time::{Duration, Instant};
 use nostr_sdk::{Event, Kind, Timestamp};
 use web_of_trust::relay::fetch::paginate_chunk_gated;
 use web_of_trust::relay::handle_relay_message;
+use web_of_trust::relay::health::{RelayHealthRegistry, DEFAULT_HEALTH_ALPHA};
 use web_of_trust::relay::nip11::{LimitCache, RelayLimits};
 use web_of_trust::relay::rate_limit::RateLimiterRegistry;
 
@@ -218,12 +219,18 @@ async fn two_pooled_relays_get_independent_limiter_keys() -> anyhow::Result<()> 
 #[test]
 fn rate_limited_message_escalates_failure_count() {
     let registry = RateLimiterRegistry::new();
+    let health = RelayHealthRegistry::new(DEFAULT_HEALTH_ALPHA);
     let relay = "wss://relay.example";
 
     assert_eq!(registry.failure_count(relay), 0);
-    handle_relay_message(&registry, relay, "rate-limited: slow down");
+    assert_eq!(health.score(relay), 1.0, "unknown relay starts healthy");
+    handle_relay_message(&registry, &health, relay, "rate-limited: slow down");
     assert_eq!(registry.failure_count(relay), 1, "a rate-limited notice must escalate backoff");
-    handle_relay_message(&registry, relay, "rate-limited: still too fast");
+    assert!(
+        health.score(relay) < 1.0,
+        "a rate-limited notice also degrades the health score (RELAY-06)"
+    );
+    handle_relay_message(&registry, &health, relay, "rate-limited: still too fast");
     assert_eq!(registry.failure_count(relay), 2, "repeated notices escalate per relay");
 }
 
@@ -232,9 +239,10 @@ fn rate_limited_message_escalates_failure_count() {
 #[test]
 fn blocked_message_does_not_increment_rate_limit_counter() {
     let registry = RateLimiterRegistry::new();
+    let health = RelayHealthRegistry::new(DEFAULT_HEALTH_ALPHA);
     let relay = "wss://hostile.example";
 
-    handle_relay_message(&registry, relay, "blocked: you are banned");
+    handle_relay_message(&registry, &health, relay, "blocked: you are banned");
     assert_eq!(
         registry.failure_count(relay),
         0,
@@ -248,10 +256,11 @@ fn blocked_message_does_not_increment_rate_limit_counter() {
 #[test]
 fn consumer_and_fetch_share_one_registry() {
     let registry = Arc::new(RateLimiterRegistry::new());
+    let health = RelayHealthRegistry::new(DEFAULT_HEALTH_ALPHA);
     let relay = "wss://relay.example";
 
     // Consumer side records a notice...
-    handle_relay_message(&registry, relay, "rate-limited: too fast");
+    handle_relay_message(&registry, &health, relay, "rate-limited: too fast");
     // ...and the fetch side (a clone of the same Arc) sees the escalation.
     let fetch_side = Arc::clone(&registry);
     assert_eq!(fetch_side.failure_count(relay), 1);
