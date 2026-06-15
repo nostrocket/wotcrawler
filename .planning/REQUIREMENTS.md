@@ -41,8 +41,8 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Refresh
 
 - [x] **FRESH-01**: Every pubkey records when its follow-list knowledge was last acquired or confirmed
-- [ ] **FRESH-02**: A staleness scanner enqueues pubkeys whose knowledge exceeds a configurable uniform TTL into the same frontier the initial crawl uses
-- [ ] **FRESH-03**: Each refresh records whether the follow list actually changed, accumulating per-pubkey churn data to ground a future adaptive policy
+- [x] **FRESH-02**: A staleness scanner enqueues pubkeys whose knowledge exceeds a configurable uniform TTL into the same frontier the initial crawl uses
+- [x] **FRESH-03**: Each refresh records whether the follow list actually changed, accumulating per-pubkey churn data to ground a future adaptive policy
 
 ### Observability
 
@@ -55,7 +55,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Operations
 
 - [ ] **OPS-01**: Single Rust daemon binary configured via config file (anchor pubkey, relay set, TTL, DB URL, concurrency caps)
-- [ ] **OPS-02**: Graceful shutdown drains in-flight work and leaves DB state consistent
+- [x] **OPS-02**: Graceful shutdown drains in-flight work and leaves DB state consistent
 
 ## v2 Requirements
 
@@ -109,15 +109,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CRAWL-03 | Phase 3 | Complete |
 | CRAWL-04 | Phase 3 | Complete |
 | FRESH-01 | Phase 3 | Complete |
-| FRESH-02 | Phase 4 | Pending |
-| FRESH-03 | Phase 4 | Pending |
+| FRESH-02 | Phase 4 | Complete |
+| FRESH-03 | Phase 4 | Complete |
 | OBS-01 | Phase 4 | Pending |
 | OBS-02 | Phase 4 | Pending |
 | OBS-03 | Phase 4 | Pending |
 | OBS-04 | Phase 4 | Pending |
 | OBS-05 | Phase 4 | Pending |
 | OPS-01 | Phase 4 | Pending |
-| OPS-02 | Phase 4 | Pending |
+| OPS-02 | Phase 4 | Complete |
 
 **Coverage:**
 

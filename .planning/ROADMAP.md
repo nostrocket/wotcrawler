@@ -137,7 +137,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 1**
 
-  - [ ] 04-01-PLAN.md — Deps + crawler bin + index-only migration 0003 + frontier staleness/in-run reclaim sweeps + Wave 0 test scaffolds (FRESH-02, FRESH-03, OPS-02)
+  - [x] 04-01-PLAN.md — Deps + crawler bin + index-only migration 0003 + frontier staleness/in-run reclaim sweeps + Wave 0 test scaffolds (FRESH-02, FRESH-03, OPS-02)
 
 **Wave 2** *(blocked on Wave 1; 04-02 and 04-03 run in parallel — disjoint files)*
 
@@ -173,5 +173,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 1. Schema & Data Contract | 3/3 | Complete   | 2026-06-12 |
 | 2. Relay Acquisition & Validation | 12/12 | Complete    | 2026-06-13 |
 | 3. Graph Writer & BFS Frontier | 3/3 | Complete    | 2026-06-13 |
-| 4. Daemon, Staleness Loop & Observability | 0/5 | Not started | - |
+| 4. Daemon, Staleness Loop & Observability | 1/5 | In Progress|  |
 | 5. NIP-65 Outbox Routing & Relay Health | 0/TBD | Not started | - |

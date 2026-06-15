@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-03-PLAN.md (Phase 3 ready for verification)
-last_updated: "2026-06-15T03:55:22.517Z"
-last_activity: 2026-06-15 -- Phase 4 planning complete
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-06-15T04:10:14.653Z"
+last_activity: 2026-06-15 -- Phase 4 execution started
 progress:
   total_phases: 5
   completed_phases: 3
-  total_plans: 18
-  completed_plans: 18
+  total_plans: 23
+  completed_plans: 19
   percent: 60
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-11)
 
 **Core value:** From one anchor pubkey, maintain a complete and continuously fresh follow graph of everyone reachable through follows — fetched efficiently — so a downstream trust/spam layer can read it from a shared database at any time.
-**Current focus:** Phase 03 — graph-writer-bfs-frontier
+**Current focus:** Phase 4 — daemon-staleness-loop-observability
 
 ## Current Position
 
-Phase: 4
-Plan: Not started
+Phase: 4 (daemon-staleness-loop-observability) — EXECUTING
+Plan: 2 of 5
 Status: Ready to execute
-Last activity: 2026-06-15 -- Phase 4 planning complete
+Last activity: 2026-06-15 -- Phase 4 execution started
 
 Progress: [████░░░░░░] 40% (2/5 phases)
 
@@ -72,6 +72,7 @@ Progress: [████░░░░░░] 40% (2/5 phases)
 | Phase 03 P01 | 13 | 4 tasks | 4 files |
 | Phase 03 P02 | 9 | 2 tasks | 5 files |
 | Phase 03-graph-writer-bfs-frontier P03 | 18min | 3 tasks | 5 files |
+| Phase 04 P01 | 24 | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -103,6 +104,7 @@ Recent decisions affecting current work:
 - [Phase 3]: [03-02] Frontier queue primitives shipped (CRAWL-01/02/03, FRESH-01): src/crawl module registered; frontier::seed_anchor (D-03, verbatim upsert_pubkey), claim_batch (FOR UPDATE SKIP LOCKED CTE in its own short txn so the lock releases before the fetch, D-04/D-07), reclaim_stale_on_startup (in_progress->discovered sweep, D-06), requeue_or_fail (single atomic UPDATE bumping fetch_attempts and branching on the post-increment value — requeue under cap, terminal failed + last_fetched_at stamp at cap, D-09/D-11). ClaimedAuthor{id,pubkey}; documented DEFAULT_BATCH_SIZE/CONCURRENCY/MAX_ATTEMPTS. 7 frontier-module integration tests green; 4 end-to-end crawl-loop tests kept ignored for 03-03. .sqlx regenerated for the 3 new queries; offline build green. No new error enum (StoreError reused); $2::int2 cast keeps the i16 max_attempts bind aligned with the SMALLINT column.
 - [Phase ?]: run_crawl is generic over an injected fetch_union closure (not a live Client) so the BFS crawl is verified deterministically offline; production live-relay fan-out is a thin Phase 4 closure
 - [Phase ?]: D-08 single-ingest-over-union realized by reusing Phase 2 acquire_validated_lists with a raw-union fetch closure; ingest_events runs once over the cross-relay union, never per relay
+- [Phase 04]: [04-01] Phase 4 foundation shipped: daemon deps (clap/tracing/tracing-subscriber/metrics-exporter-prometheus default-features=false/axum/tokio-util/humantime-serde) + crawler bin target + daemon module registered; migration 0003 INDEX-ONLY (pubkeys_last_fetched_idx, no columns — churn cols pre-exist from 0001); frontier::reclaim_stale_by_ttl (FRESH-02) + reclaim_in_progress_older_than (OPS-02) proven green over real DB; join_worker -> pub(crate) for daemon-loop reuse; ScriptedGraph + fresh_db helpers promoted to tests/common; Wave 0 scaffolds (config/loop/observe) named-ignored. Two deviations: make_interval secs is Postgres double precision (bind i64-as-f64, keep i64 caller API); cargo sqlx prepare MUST use -- --all-targets to retain integration-test query metadata.
 
 ### Pending Todos
 
@@ -123,6 +125,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-13T14:34:32.131Z
-Stopped at: Completed 03-03-PLAN.md (Phase 3 ready for verification)
+Last session: 2026-06-15T04:10:00.350Z
+Stopped at: Completed 04-01-PLAN.md
 Resume file: None
