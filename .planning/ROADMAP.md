@@ -163,6 +163,21 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Each relay carries a health score derived from observed behavior (connect failures, timeouts, rate-limit hits, response latency).
   3. The health score visibly drives routing decisions and per-relay concurrency, so a degraded relay receives less traffic than a healthy one.
 
+**Plans**: 4 plans
+
+**Wave 1** *(disjoint file-sets, run in parallel)*
+
+  - [ ] 05-01-PLAN.md — Migration 0004 pubkey_relays + ValidatedRelayList + nip65 r-tag extraction + apply_relay_list/lookup_write_relays + URL-aware/error-injecting ScriptedGraph seam + nip65_fallback scaffold (RELAY-05)
+  - [ ] 05-02-PLAN.md — RelayHealthRegistry (EWMA score/permits/probe) + rate-limit-hit capture in NOTICE consumer + 5 new config fields with fail-fast validation (RELAY-06)
+
+**Wave 2** *(blocked on 05-01 + 05-02; wires fallback into process_batch)*
+
+  - [ ] 05-03-PLAN.md — NIP-65 fallback at the not_found arm: injected fallback_fetch closure, on-demand kind:10002 resolve+persist, health-ordered write-relay selection, re-validate via acquire_validated_lists, nip65_recovered counter (RELAY-05)
+
+**Wave 3** *(blocked on 05-02 + 05-03; the only routing site)*
+
+  - [ ] 05-04-PLAN.md — Health-driven fan-out (skip-below-threshold + probe) + per-relay Semaphore admission gate + deadlock-safe acquisition order + fetch-arm health capture + curated-only health/concurrency gauges + Grafana panels (RELAY-06)
+
 ## Progress
 
 **Execution Order:**
@@ -174,4 +189,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Relay Acquisition & Validation | 12/12 | Complete    | 2026-06-13 |
 | 3. Graph Writer & BFS Frontier | 3/3 | Complete    | 2026-06-13 |
 | 4. Daemon, Staleness Loop & Observability | 5/5 | Complete    | 2026-06-15 |
-| 5. NIP-65 Outbox Routing & Relay Health | 0/TBD | Not started | - |
+| 5. NIP-65 Outbox Routing & Relay Health | 0/4 | Planned | - |

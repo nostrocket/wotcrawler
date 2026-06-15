@@ -516,8 +516,7 @@ match fetch_complete_with_timeout(/* ... */).await {
 
 **If this table is empty:** it is not — all four are LOW-risk discretion/modeling choices, none are compliance/security/correctness claims.
 
-## Open Questions
-
+## Open Questions (RESOLVED)
 1. **Should the on-demand kind:10002 fetch count against the author's fetch-retry budget?**
    - What we know: the on-demand fetch is a separate curated fetch before the kind-3 fallback.
    - What's unclear: whether a *failed* on-demand kind:10002 fetch should requeue the author or proceed to `not_found`.
