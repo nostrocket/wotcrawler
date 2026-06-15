@@ -21,3 +21,9 @@
 /// validation (OPS-01). See [`config::Config`], [`config::load_config`],
 /// [`config::validate`].
 pub mod config;
+
+/// Observability surface (OBS-01/02/03): Prometheus recorder install, `tracing`
+/// init with human/JSON format selection, and the axum router serving `/metrics`
+/// + `/health/live` + `/health/ready`. See [`observe::install_metrics`],
+/// [`observe::init_tracing`], [`observe::router`].
+pub mod observe;
