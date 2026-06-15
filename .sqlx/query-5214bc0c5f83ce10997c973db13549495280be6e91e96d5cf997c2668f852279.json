@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE pubkeys SET status = 'discovered', claimed_at = NULL, fetch_attempts = 0 WHERE status = 'in_progress' AND claimed_at < now() - make_interval(secs => $1::double precision)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5214bc0c5f83ce10997c973db13549495280be6e91e96d5cf997c2668f852279"
+}

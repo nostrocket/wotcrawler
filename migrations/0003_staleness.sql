@@ -1,0 +1,23 @@
+-- Phase 4 staleness support: index the TTL-driven staleness scan (FRESH-02).
+--
+-- This migration is idempotent and strictly ADDITIVE: re-running it against an
+-- already-migrated database is a no-op. It uses CREATE INDEX IF NOT EXISTS;
+-- sqlx also wraps each migration in a transaction by default.
+--
+-- Scope: INDEX-ONLY. This migration adds NO columns. The FRESH-03 churn columns
+-- (last_changed_at, fetch_count, change_count) already shipped in migration 0001
+-- (0001:24-26) and are already written by apply_follow_list (follows.rs:120-135)
+-- on every apply — each re-fetch bumps fetch_count, and a changed list bumps
+-- change_count + last_changed_at (RESEARCH A3 correction: they pre-exist, do NOT
+-- re-add them). The follows table and every other Phase 1/3 object are untouched.
+--
+-- Why a new index (RESEARCH Pitfall 2): the staleness scanner re-enqueues
+-- 'fetched'/'not_found'/'failed' rows whose last_fetched_at is older than the TTL.
+-- The existing partial index pubkeys_status_idx (0001:44-45) is
+-- WHERE status IN ('discovered','not_found','failed') — it DELIBERATELY EXCLUDES
+-- 'fetched', which is the bulk of the staleness re-enqueue population. Without an
+-- index on last_fetched_at the periodic sweep degrades to a full table scan at
+-- millions of rows (threat T-04-01). Index last_fetched_at so the age comparison
+-- (last_fetched_at < now() - ttl) is index-supported.
+
+CREATE INDEX IF NOT EXISTS pubkeys_last_fetched_idx ON pubkeys (last_fetched_at);

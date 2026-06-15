@@ -112,6 +112,72 @@ pub async fn reclaim_stale_on_startup(pool: &PgPool) -> Result<u64, StoreError> 
     Ok(result.rows_affected())
 }
 
+/// TTL-driven staleness scan (FRESH-02): re-enqueue every terminal-status row
+/// whose knowledge is older than `ttl_secs` back into the `discovered` frontier.
+/// Returns the number of rows re-enqueued.
+///
+/// A periodic copy of [`reclaim_stale_on_startup`] keyed on age instead of the
+/// transient lease state. It flips `fetched`/`not_found`/`failed` rows whose
+/// `last_fetched_at` is older than the configurable uniform TTL back to
+/// `discovered` so the next [`claim_batch`] picks them up — no change to the
+/// claim/apply path. Fresh rows (inside the TTL) are left untouched.
+///
+/// Runs as a single statement directly on the pool — NOT inside a long
+/// transaction (the sweep can touch many rows; a long-held txn would block
+/// concurrent claims/applies). `make_interval(secs => $1)` keeps the bind a plain
+/// `i64`, avoiding interval-string formatting. The age comparison is supported by
+/// the `pubkeys_last_fetched_idx` added in migration 0003 (threat T-04-01).
+pub async fn reclaim_stale_by_ttl(pool: &PgPool, ttl_secs: i64) -> Result<u64, StoreError> {
+    let result = sqlx::query!(
+        // Reset `claimed_at = NULL, fetch_attempts = 0`: this is load-bearing.
+        // `fetch_attempts` is a *relay-failure* count; a fresh re-fetch cycle must
+        // not inherit prior retry counts or it would be one error away from a
+        // spurious terminal `failed` (see reclaim_stale_on_startup, WR-02).
+        // Re-fetching is harmless — apply_follow_list is idempotent (D-05).
+        "UPDATE pubkeys SET status = 'discovered', claimed_at = NULL, fetch_attempts = 0 \
+         WHERE status IN ('fetched','not_found','failed') \
+           AND last_fetched_at < now() - make_interval(secs => $1::double precision)",
+        ttl_secs as f64
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected())
+}
+
+/// Periodic in-run reclaim of orphaned `in_progress` leases older than
+/// `age_secs` (OPS-02). Returns the number of leases reset.
+///
+/// The continuous-run companion to [`reclaim_stale_on_startup`], explicitly
+/// deferred from Phase 3 (`frontier.rs:98`): a multi-day run can abandon a lease
+/// without a restart (a worker stuck/dropped mid-fetch). This sweep recovers them
+/// without waiting for the next process start.
+///
+/// Unlike the startup reclaim, it is age-gated: it resets ONLY rows whose
+/// `claimed_at` is older than `age_secs` — set to a few × the fetch timeout so a
+/// freshly-claimed, still-live lease is NEVER reset out from under an in-flight
+/// fetch (RESEARCH Open Question 2 / threat T-04-02). Same single-statement-on-
+/// pool shape and `make_interval(secs => $1)` plain-`i64` bind as
+/// [`reclaim_stale_by_ttl`].
+pub async fn reclaim_in_progress_older_than(
+    pool: &PgPool,
+    age_secs: i64,
+) -> Result<u64, StoreError> {
+    let result = sqlx::query!(
+        // Same load-bearing reset rationale as reclaim_stale_on_startup: a row
+        // orphaned mid-flight must not inherit its retry budget; clearing
+        // `claimed_at` releases the lease. apply_follow_list is idempotent (D-05).
+        "UPDATE pubkeys SET status = 'discovered', claimed_at = NULL, fetch_attempts = 0 \
+         WHERE status = 'in_progress' \
+           AND claimed_at < now() - make_interval(secs => $1::double precision)",
+        age_secs as f64
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected())
+}
+
 /// Resolve a transient fetch error: bump `fetch_attempts` and either requeue the
 /// pubkey for retry or mark it terminally `failed` (D-09/D-11, FRESH-01).
 ///
