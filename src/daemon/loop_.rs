@@ -98,7 +98,12 @@ where
     let sem = Arc::new(Semaphore::new(concurrency));
     let mut workers: Vec<tokio::task::JoinHandle<Result<(), StoreError>>> = Vec::new();
 
-    loop {
+    // Run the loop + drain in an inner block so `loop_alive` is flipped back to
+    // `false` on EVERY exit — clean shutdown OR an early `?` error (WR-03 / OBS-03:
+    // `/health/ready` returns 200 only while the loop is genuinely alive). Without
+    // this, readiness stays 200 through the drain and after the loop stops.
+    let result: Result<CrawlStats, StoreError> = async {
+        loop {
         // Cancel at the claim boundary (OPS-02): once shutdown is requested we stop
         // CLAIMING new rows. In-flight workers are drained after the loop. We never
         // wrap process_batch in a select! (Pitfall 4) — only claiming is cancelled.
@@ -196,14 +201,23 @@ where
         for handle in finished {
             join_worker(handle).await?;
         }
-    }
+        }
 
-    // Graceful drain (OPS-02 / T-04-08): the loop has stopped claiming; join every
-    // remaining in-flight worker so each leased row reaches a terminal status. Zero
-    // orphaned `in_progress` leases remain after this returns.
-    for handle in workers.drain(..) {
-        join_worker(handle).await?;
-    }
+        // Graceful drain (OPS-02 / T-04-08): the loop has stopped claiming; join
+        // every remaining in-flight worker so each leased row reaches a terminal
+        // status. Zero orphaned `in_progress` leases remain after this returns.
+        for handle in workers.drain(..) {
+            join_worker(handle).await?;
+        }
 
-    Ok(stats)
+        Ok(stats)
+    }
+    .await;
+
+    // The loop has stopped (clean shutdown or error): readiness must no longer
+    // report up (WR-03 / OBS-03). Set BEFORE returning so a probe racing the
+    // return never sees 200 after the loop is gone.
+    loop_alive.store(false, Ordering::Relaxed);
+
+    result
 }

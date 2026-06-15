@@ -112,7 +112,13 @@ async fn graceful_drain_no_orphan_leases() -> anyhow::Result<()> {
         .expect("loop must return Ok");
 
     assert!(stats.authors_claimed >= 1, "loop must have claimed at least the anchor");
-    assert!(loop_alive.load(Ordering::Relaxed), "loop_alive set true after seeding");
+    // WR-03 / OBS-03: once the loop has returned (drained on cancel), readiness
+    // must be back to false — `/health/ready` returns 200 only while the loop is
+    // genuinely alive, never through/after the shutdown drain.
+    assert!(
+        !loop_alive.load(Ordering::Relaxed),
+        "loop_alive must flip back to false once the loop drains/returns (WR-03)"
+    );
 
     // OPS-02 guarantee: zero orphaned in_progress leases after the drain.
     assert_eq!(
