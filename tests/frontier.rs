@@ -16,12 +16,11 @@
 
 mod common;
 
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use chrono::Utc;
-use nostr_sdk::{Event, Kind, PublicKey, Timestamp};
+use nostr_sdk::{Event, Kind, Timestamp};
 use web_of_trust::crawl::frontier::{
     claim_batch, reclaim_stale_on_startup, requeue_or_fail, seed_anchor, ClaimedAuthor,
 };
@@ -29,95 +28,11 @@ use web_of_trust::crawl::run_crawl;
 use web_of_trust::error::RelayError;
 use web_of_trust::store::{self, pubkeys::upsert_pubkey};
 
-/// A deterministic, offline, `Send` scripted relay graph for the end-to-end
-/// crawl-loop tests. Maps each author's pubkey to the signed kind-3 event that
-/// "the relays" return for it. Unlike `mock_relay::ScriptedRelay` (which is
-/// `Rc<RefCell>` / `!Send` and so cannot cross a `tokio::spawn`), this is
-/// `Arc`-backed so the bounded worker loop can hold it across spawned workers.
-///
-/// `fetch_union` returns a closure of the exact shape `run_crawl` expects: given
-/// an owned claimed batch it produces the raw `Vec<Event>` union for those
-/// authors (modeling D-08's cross-relay union before the single ingest pass).
-#[derive(Clone)]
-struct ScriptedGraph {
-    /// author pubkey bytes -> the signed kind-3 event that author publishes.
-    events: Arc<HashMap<Vec<u8>, Event>>,
-}
-
-impl ScriptedGraph {
-    fn new(events: Vec<Event>) -> Self {
-        let map = events
-            .into_iter()
-            .map(|e| (e.pubkey.to_bytes().to_vec(), e))
-            .collect();
-        Self {
-            events: Arc::new(map),
-        }
-    }
-
-    /// Build the raw cross-relay union for a claimed batch: every scripted event
-    /// whose author is in the batch (an author with no scripted event contributes
-    /// nothing — modeling a `not_found`).
-    fn union_for(&self, batch: &[ClaimedAuthor]) -> Vec<Event> {
-        batch
-            .iter()
-            .filter_map(|c| self.events.get(&c.pubkey).cloned())
-            .collect()
-    }
-
-    /// A `fetch_union` closure for `run_crawl` (no instrumentation).
-    fn fetch_fn(
-        &self,
-    ) -> impl Fn(Vec<ClaimedAuthor>) -> std::future::Ready<Result<Vec<Event>, RelayError>>
-           + Clone
-           + Send
-           + Sync
-           + 'static {
-        let me = self.clone();
-        move |batch: Vec<ClaimedAuthor>| std::future::ready(Ok(me.union_for(&batch)))
-    }
-}
-
-/// Build a signed kind-3 event for `author` (seed) following each `followees`
-/// seed, dated `created_at`. Mirrors `common::signed_event` but takes seeds so
-/// the BFS graph reads declaratively in the tests.
-fn follows_event(author_seed: u8, followees: &[u8], created_at: u64) -> Event {
-    let author = common::keys(author_seed);
-    let p_tags: Vec<PublicKey> = followees
-        .iter()
-        .map(|&s| common::keys(s).public_key())
-        .collect();
-    common::signed_event(&author, Kind::ContactList, Timestamp::from_secs(created_at), &p_tags)
-}
-
-/// Deterministic 32-byte pubkey from a single seed (mirrors concurrency::pk).
-fn pk(seed: u16) -> [u8; 32] {
-    let mut k = [0u8; 32];
-    k[0] = (seed & 0xff) as u8;
-    k[1] = (seed >> 8) as u8;
-    k
-}
-
-/// Connect + migrate a fresh testcontainers Postgres, returning the live pool.
-/// The container handle is returned alongside so the caller keeps it alive.
-async fn fresh_db() -> anyhow::Result<(
-    testcontainers::ContainerAsync<testcontainers_modules::postgres::Postgres>,
-    sqlx::PgPool,
-)> {
-    let (pg, url) = common::start_postgres().await?;
-    let pool = store::connect(&url).await?;
-    store::run_migrations(&pool).await?;
-    Ok((pg, pool))
-}
-
-/// Read a pubkey's current status string.
-async fn status_of(pool: &sqlx::PgPool, id: i64) -> anyhow::Result<String> {
-    let s = sqlx::query_scalar::<_, String>("SELECT status FROM pubkeys WHERE id = $1")
-        .bind(id)
-        .fetch_one(pool)
-        .await?;
-    Ok(s)
-}
+// The `ScriptedGraph` mock + the `follows_event` / `pk` / `fresh_db` / `status_of`
+// fixtures were promoted into `tests/common/mod.rs` (plan 04-01) so the
+// crawl/daemon-loop test binaries share one harness. The existing test bodies
+// below use them unqualified via these re-uses.
+use common::{follows_event, fresh_db, pk, status_of, ScriptedGraph};
 
 /// CRAWL-01 / D-03: seeding the anchor lands exactly one `discovered` row and
 /// returns its id; it is the only externally-inserted pubkey.

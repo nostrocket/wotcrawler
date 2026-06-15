@@ -15,10 +15,16 @@
 
 #![allow(dead_code)]
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use nostr_sdk::{Event, EventBuilder, Keys, Kind, PublicKey, SecretKey, Tag, Timestamp};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::ContainerAsync;
 use testcontainers_modules::postgres::Postgres;
+use web_of_trust::crawl::frontier::ClaimedAuthor;
+use web_of_trust::error::RelayError;
+use web_of_trust::store;
 
 /// Start an ephemeral Postgres container and return its handle plus a connection URL.
 ///
@@ -122,4 +128,96 @@ pub fn same_created_at_pair(signer: &Keys, created_at: Timestamp) -> (Event, Eve
 pub fn future_dated_event(signer: &Keys, kind: Kind, seconds_ahead: u64) -> Event {
     let future = Timestamp::from(Timestamp::now().as_secs() + seconds_ahead);
     signed_event(signer, kind, future, &[])
+}
+
+// ---------------------------------------------------------------------------
+// DB + scripted-graph fixtures (shared by tests/frontier.rs, tests/staleness.rs,
+// tests/daemon_loop.rs). Promoted here from tests/frontier.rs (plan 04-01) so the
+// injected-`fetch_union` seam + the Postgres harness are reused by every
+// crawl/daemon-loop test binary, never duplicated.
+// ---------------------------------------------------------------------------
+
+/// A deterministic, offline, `Send` scripted relay graph for the end-to-end
+/// crawl-loop tests. Maps each author's pubkey to the signed kind-3 event that
+/// "the relays" return for it. Unlike `mock_relay::ScriptedRelay` (which is
+/// `Rc<RefCell>` / `!Send` and so cannot cross a `tokio::spawn`), this is
+/// `Arc`-backed so the bounded worker loop can hold it across spawned workers.
+///
+/// [`ScriptedGraph::fetch_fn`] returns a closure of the exact shape `run_crawl`
+/// (and the Phase 4 daemon loop) expects: given an owned claimed batch it produces
+/// the raw `Vec<Event>` union for those authors (modeling D-08's cross-relay union
+/// before the single ingest pass).
+#[derive(Clone)]
+pub struct ScriptedGraph {
+    /// author pubkey bytes -> the signed kind-3 event that author publishes.
+    events: Arc<HashMap<Vec<u8>, Event>>,
+}
+
+impl ScriptedGraph {
+    pub fn new(events: Vec<Event>) -> Self {
+        let map = events
+            .into_iter()
+            .map(|e| (e.pubkey.to_bytes().to_vec(), e))
+            .collect();
+        Self {
+            events: Arc::new(map),
+        }
+    }
+
+    /// Build the raw cross-relay union for a claimed batch: every scripted event
+    /// whose author is in the batch (an author with no scripted event contributes
+    /// nothing — modeling a `not_found`).
+    pub fn union_for(&self, batch: &[ClaimedAuthor]) -> Vec<Event> {
+        batch
+            .iter()
+            .filter_map(|c| self.events.get(&c.pubkey).cloned())
+            .collect()
+    }
+
+    /// A `fetch_union` closure for `run_crawl` / the daemon loop (no instrumentation).
+    pub fn fetch_fn(
+        &self,
+    ) -> impl Fn(Vec<ClaimedAuthor>) -> std::future::Ready<Result<Vec<Event>, RelayError>>
+           + Clone
+           + Send
+           + Sync
+           + 'static {
+        let me = self.clone();
+        move |batch: Vec<ClaimedAuthor>| std::future::ready(Ok(me.union_for(&batch)))
+    }
+}
+
+/// Build a signed kind-3 event for `author` (seed) following each `followees`
+/// seed, dated `created_at`. Mirrors [`signed_event`] but takes seeds so the BFS
+/// graph reads declaratively in the tests.
+pub fn follows_event(author_seed: u8, followees: &[u8], created_at: u64) -> Event {
+    let author = keys(author_seed);
+    let p_tags: Vec<PublicKey> = followees.iter().map(|&s| keys(s).public_key()).collect();
+    signed_event(&author, Kind::ContactList, Timestamp::from_secs(created_at), &p_tags)
+}
+
+/// Deterministic 32-byte pubkey from a single seed (mirrors concurrency::pk).
+pub fn pk(seed: u16) -> [u8; 32] {
+    let mut k = [0u8; 32];
+    k[0] = (seed & 0xff) as u8;
+    k[1] = (seed >> 8) as u8;
+    k
+}
+
+/// Connect + migrate a fresh testcontainers Postgres, returning the live pool.
+/// The container handle is returned alongside so the caller keeps it alive.
+pub async fn fresh_db() -> anyhow::Result<(ContainerAsync<Postgres>, sqlx::PgPool)> {
+    let (pg, url) = start_postgres().await?;
+    let pool = store::connect(&url).await?;
+    store::run_migrations(&pool).await?;
+    Ok((pg, pool))
+}
+
+/// Read a pubkey's current status string.
+pub async fn status_of(pool: &sqlx::PgPool, id: i64) -> anyhow::Result<String> {
+    let s = sqlx::query_scalar::<_, String>("SELECT status FROM pubkeys WHERE id = $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await?;
+    Ok(s)
 }
