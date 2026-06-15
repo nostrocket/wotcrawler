@@ -46,11 +46,11 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Observability
 
-- [ ] **OBS-01**: Prometheus `/metrics` endpoint exposes crawl coverage, staleness distribution, relay health, frontier depth, fetch rate, and validation-failure counts
-- [ ] **OBS-02**: Structured logging via `tracing` with configurable levels
-- [ ] **OBS-03**: HTTP health endpoint (liveness/readiness) for process supervisors
+- [x] **OBS-01**: Prometheus `/metrics` endpoint exposes crawl coverage, staleness distribution, relay health, frontier depth, fetch rate, and validation-failure counts
+- [x] **OBS-02**: Structured logging via `tracing` with configurable levels
+- [x] **OBS-03**: HTTP health endpoint (liveness/readiness) for process supervisors
 - [ ] **OBS-04**: Periodic crawl-progress summaries (frontier size, fetch rate, coverage %) are logged during the initial multi-day crawl
-- [ ] **OBS-05**: A Grafana dashboard JSON covering the exported metrics is committed to the repo
+- [x] **OBS-05**: A Grafana dashboard JSON covering the exported metrics is committed to the repo
 
 ### Operations
 
@@ -111,11 +111,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FRESH-01 | Phase 3 | Complete |
 | FRESH-02 | Phase 4 | Complete |
 | FRESH-03 | Phase 4 | Complete |
-| OBS-01 | Phase 4 | Pending |
-| OBS-02 | Phase 4 | Pending |
-| OBS-03 | Phase 4 | Pending |
+| OBS-01 | Phase 4 | Complete |
+| OBS-02 | Phase 4 | Complete |
+| OBS-03 | Phase 4 | Complete |
 | OBS-04 | Phase 4 | Pending |
-| OBS-05 | Phase 4 | Pending |
+| OBS-05 | Phase 4 | Complete |
 | OPS-01 | Phase 4 | Pending |
 | OPS-02 | Phase 4 | Complete |
 
