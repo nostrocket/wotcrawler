@@ -251,12 +251,14 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
                 //     requeues the whole batch (D-09) but is observed first.
                 let mut union: Vec<nostr_sdk::Event> = Vec::new();
                 for relay_url in &relays {
-                    // (1) Skip a degraded relay unless a probe is due; mark the
-                    // attempt so the next skip window starts now.
-                    if !health.route_allowed(relay_url, relay_health_threshold) {
+                    // (1) Skip a degraded relay unless a probe is due; the
+                    // routing decision and the probe claim happen ATOMICALLY in a
+                    // single lock scope (CR-02) so only ONE concurrent batch wins
+                    // the probe for a degraded relay instead of all of them
+                    // flooding it at once.
+                    if !health.try_mark_attempt(relay_url, relay_health_threshold) {
                         continue;
                     }
-                    health.mark_attempt(relay_url);
 
                     let max_limit = limit_cache.get_or_fetch(relay_url).await.max_limit;
                     let sem = per_relay_sems

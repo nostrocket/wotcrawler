@@ -218,6 +218,48 @@ impl RelayHealthRegistry {
             .insert(relay.to_string(), Instant::now());
     }
 
+    /// Atomically decide routing AND claim the probe in a single `last_probe`
+    /// lock scope (CR-02). Returns `true` iff this caller may route to `relay`
+    /// right now, and — when it returns `true` — has already marked the attempt.
+    ///
+    /// This replaces the non-atomic `route_allowed` + `mark_attempt` pair: with
+    /// the two split across separate lock acquisitions, every concurrent task
+    /// evaluating a degraded relay saw the probe as "due" before any of them
+    /// marked it, so all of them probed simultaneously. Holding the `last_probe`
+    /// lock across the read-and-conditional-write guarantees exactly ONE task
+    /// wins the probe per [`PROBE_INTERVAL`].
+    ///
+    /// Semantics are preserved: allowed if `score >= threshold` (and the attempt
+    /// is marked), OR — below threshold — only if a probe is due (never attempted,
+    /// or last attempt older than [`PROBE_INTERVAL`]), in which case this task
+    /// claims the probe.
+    pub fn try_mark_attempt(&self, relay: &str, threshold: f64) -> bool {
+        // `score` takes the `scores` lock only; it is released before we take the
+        // `last_probe` lock below, so the two maps are never locked together (no
+        // lock-ordering hazard).
+        let healthy = self.score(relay) >= threshold;
+
+        let mut last = self
+            .last_probe
+            .lock()
+            .expect("health probe map not poisoned");
+        if healthy {
+            // At/above threshold: always allowed; mark the attempt so the probe
+            // clock tracks the most recent request.
+            last.insert(relay.to_string(), Instant::now());
+            return true;
+        }
+        // Below threshold: allow exactly one probe per interval. Check and claim
+        // under the same lock so concurrent callers cannot all see "due".
+        let due = match last.get(relay) {
+            None => true,
+            Some(t) => t.elapsed() >= PROBE_INTERVAL,
+        };
+        if due {
+            last.insert(relay.to_string(), Instant::now());
+        }
+        due
+    }
 }
 
 /// Run `fetch` under the deadlock-safe per-relay admission gate (RELAY-06,
