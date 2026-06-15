@@ -26,6 +26,10 @@ use serde::Deserialize;
 
 use crate::crawl::{DEFAULT_BATCH_SIZE, DEFAULT_CONCURRENCY, DEFAULT_MAX_ATTEMPTS};
 use crate::relay::fetch::DEFAULT_FETCH_TIMEOUT;
+use crate::relay::health::{
+    DEFAULT_HEALTH_ALPHA, DEFAULT_NIP65_FALLBACK_ENABLED, DEFAULT_NIP65_MAX_WRITE_RELAYS,
+    DEFAULT_PER_RELAY_CONCURRENCY, DEFAULT_RELAY_HEALTH_THRESHOLD,
+};
 use crate::relay::rate_limit::DEFAULT_REQS_PER_SECOND;
 
 /// Log output format selectable via config (OBS-02). Human-readable by default;
@@ -96,6 +100,25 @@ pub struct Config {
     /// Poll/sleep interval when the frontier is empty (continuous loop idle).
     #[serde(with = "humantime_serde", default = "default_idle_poll_interval")]
     pub idle_poll_interval: Duration,
+    /// Whether the NIP-65 write-relay fallback fires when the curated set misses
+    /// a pubkey's follow list (RELAY-06 / 05-04 routing).
+    #[serde(default = "default_nip65_fallback_enabled")]
+    pub nip65_fallback_enabled: bool,
+    /// Max NIP-65 write relays a single fallback fans out to. Must be > 0.
+    #[serde(default = "default_nip65_max_write_relays")]
+    pub nip65_max_write_relays: usize,
+    /// Routing threshold (RELAY-06): a relay scoring below this is skipped in the
+    /// fan-out unless a periodic probe is due. Must be in `[0, 1]`.
+    #[serde(default = "default_relay_health_threshold")]
+    pub relay_health_threshold: f64,
+    /// Per-relay concurrency cap (RELAY-06): effective concurrency scales down
+    /// from this with the relay's health score. Must be > 0.
+    #[serde(default = "default_per_relay_concurrency")]
+    pub per_relay_concurrency: usize,
+    /// EWMA smoothing factor for the per-relay health score (RELAY-06): smaller
+    /// reacts slower (more memory). Must be in `(0, 1]`.
+    #[serde(default = "default_health_alpha")]
+    pub health_alpha: f64,
 }
 
 // Default fns reference the existing library consts by name — never re-literal
@@ -135,6 +158,21 @@ fn default_reclaim_age() -> Duration {
 fn default_idle_poll_interval() -> Duration {
     Duration::from_secs(5)
 }
+fn default_nip65_fallback_enabled() -> bool {
+    DEFAULT_NIP65_FALLBACK_ENABLED
+}
+fn default_nip65_max_write_relays() -> usize {
+    DEFAULT_NIP65_MAX_WRITE_RELAYS
+}
+fn default_relay_health_threshold() -> f64 {
+    DEFAULT_RELAY_HEALTH_THRESHOLD
+}
+fn default_per_relay_concurrency() -> usize {
+    DEFAULT_PER_RELAY_CONCURRENCY
+}
+fn default_health_alpha() -> f64 {
+    DEFAULT_HEALTH_ALPHA
+}
 
 /// Hand-implemented `Debug` that REDACTS `database_url` (T-04-03 / T-03-04).
 ///
@@ -160,6 +198,11 @@ impl fmt::Debug for Config {
             .field("reclaim_interval", &self.reclaim_interval)
             .field("reclaim_age", &self.reclaim_age)
             .field("idle_poll_interval", &self.idle_poll_interval)
+            .field("nip65_fallback_enabled", &self.nip65_fallback_enabled)
+            .field("nip65_max_write_relays", &self.nip65_max_write_relays)
+            .field("relay_health_threshold", &self.relay_health_threshold)
+            .field("per_relay_concurrency", &self.per_relay_concurrency)
+            .field("health_alpha", &self.health_alpha)
             .finish()
     }
 }
@@ -211,5 +254,20 @@ pub fn validate(c: &Config) -> anyhow::Result<()> {
     anyhow::ensure!(c.concurrency > 0, "concurrency must be > 0");
     anyhow::ensure!(c.batch_size > 0, "batch_size must be > 0");
     anyhow::ensure!(c.reqs_per_second > 0, "reqs_per_second must be > 0");
+    // RELAY-06 fail-fast guards (05-02): a degenerate routing/concurrency knob
+    // must die at startup, not after DB/relay setup.
+    anyhow::ensure!(
+        c.nip65_max_write_relays > 0,
+        "nip65_max_write_relays must be > 0"
+    );
+    anyhow::ensure!(c.per_relay_concurrency > 0, "per_relay_concurrency must be > 0");
+    anyhow::ensure!(
+        (0.0..=1.0).contains(&c.relay_health_threshold),
+        "relay_health_threshold must be in [0,1]"
+    );
+    anyhow::ensure!(
+        c.health_alpha > 0.0 && c.health_alpha <= 1.0,
+        "health_alpha must be in (0,1]"
+    );
     Ok(())
 }

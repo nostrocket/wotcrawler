@@ -191,3 +191,92 @@ fn reqs_per_second_zero_rejected() {
         "error should mention reqs_per_second, got: {err}"
     );
 }
+
+/// RELAY-06: the 5 new fields fall back to their `relay::health::DEFAULT_*` consts
+/// when omitted, and a minimal config still validates.
+#[test]
+fn relay_health_fields_default_fill() {
+    let tmp = TempToml::new(&minimal_toml());
+    let cfg = load_config(&tmp.stem).expect("minimal config loads");
+    validate(&cfg).expect("minimal config is valid");
+
+    assert!(cfg.nip65_fallback_enabled, "nip65_fallback_enabled defaults true");
+    assert_eq!(cfg.nip65_max_write_relays, 3, "nip65_max_write_relays default");
+    assert_eq!(cfg.per_relay_concurrency, 4, "per_relay_concurrency default");
+    assert_eq!(cfg.relay_health_threshold, 0.25, "relay_health_threshold default");
+    assert_eq!(cfg.health_alpha, 0.3, "health_alpha default");
+}
+
+/// RELAY-06 fail-fast: `nip65_max_write_relays = 0` is rejected — a zero fan-out
+/// cap would mean the fallback can never reach a write relay.
+#[test]
+fn nip65_max_write_relays_zero_rejected() {
+    let body = format!("{}\nnip65_max_write_relays = 0\n", minimal_toml());
+    let tmp = TempToml::new(&body);
+    let cfg = load_config(&tmp.stem).expect("config with nip65_max_write_relays=0 deserializes");
+    let err = validate(&cfg).expect_err("nip65_max_write_relays = 0 must fail validation");
+    assert!(
+        err.to_string().contains("nip65_max_write_relays"),
+        "error should mention nip65_max_write_relays, got: {err}"
+    );
+}
+
+/// RELAY-06 fail-fast: `per_relay_concurrency = 0` is rejected — zero permits
+/// would starve every relay (permits = max(1, ..) protects at runtime, but the
+/// config knob is still a misconfiguration that must die at startup).
+#[test]
+fn per_relay_concurrency_zero_rejected() {
+    let body = format!("{}\nper_relay_concurrency = 0\n", minimal_toml());
+    let tmp = TempToml::new(&body);
+    let cfg = load_config(&tmp.stem).expect("config with per_relay_concurrency=0 deserializes");
+    let err = validate(&cfg).expect_err("per_relay_concurrency = 0 must fail validation");
+    assert!(
+        err.to_string().contains("per_relay_concurrency"),
+        "error should mention per_relay_concurrency, got: {err}"
+    );
+}
+
+/// RELAY-06 fail-fast: `relay_health_threshold` out of `[0,1]` is rejected (both
+/// above 1 and below 0).
+#[test]
+fn relay_health_threshold_out_of_range_rejected() {
+    let high = format!("{}\nrelay_health_threshold = 1.5\n", minimal_toml());
+    let tmp = TempToml::new(&high);
+    let cfg = load_config(&tmp.stem).expect("config with threshold=1.5 deserializes");
+    let err = validate(&cfg).expect_err("relay_health_threshold = 1.5 must fail validation");
+    assert!(
+        err.to_string().contains("relay_health_threshold"),
+        "error should mention relay_health_threshold, got: {err}"
+    );
+
+    let low = format!("{}\nrelay_health_threshold = -0.1\n", minimal_toml());
+    let tmp = TempToml::new(&low);
+    let cfg = load_config(&tmp.stem).expect("config with threshold=-0.1 deserializes");
+    let err = validate(&cfg).expect_err("relay_health_threshold = -0.1 must fail validation");
+    assert!(
+        err.to_string().contains("relay_health_threshold"),
+        "error should mention relay_health_threshold, got: {err}"
+    );
+}
+
+/// RELAY-06 fail-fast: `health_alpha` outside `(0,1]` is rejected (0.0 and > 1.0).
+#[test]
+fn health_alpha_out_of_range_rejected() {
+    let zero = format!("{}\nhealth_alpha = 0.0\n", minimal_toml());
+    let tmp = TempToml::new(&zero);
+    let cfg = load_config(&tmp.stem).expect("config with health_alpha=0.0 deserializes");
+    let err = validate(&cfg).expect_err("health_alpha = 0.0 must fail validation");
+    assert!(
+        err.to_string().contains("health_alpha"),
+        "error should mention health_alpha, got: {err}"
+    );
+
+    let big = format!("{}\nhealth_alpha = 1.5\n", minimal_toml());
+    let tmp = TempToml::new(&big);
+    let cfg = load_config(&tmp.stem).expect("config with health_alpha=1.5 deserializes");
+    let err = validate(&cfg).expect_err("health_alpha = 1.5 must fail validation");
+    assert!(
+        err.to_string().contains("health_alpha"),
+        "error should mention health_alpha, got: {err}"
+    );
+}

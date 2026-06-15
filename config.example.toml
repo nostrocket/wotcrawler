@@ -76,3 +76,28 @@ reclaim_age = "5m"
 # Poll/sleep interval when the frontier is empty (the continuous loop idles
 # instead of exiting while the daemon is live).
 idle_poll_interval = "5s"
+
+# --- NIP-65 outbox routing & relay health (RELAY-06) -------------------------
+
+# Whether the NIP-65 write-relay fallback fires when the curated relay set
+# misses a pubkey's follow list. Default: DEFAULT_NIP65_FALLBACK_ENABLED (true).
+nip65_fallback_enabled = true
+
+# Max NIP-65 write relays a single fallback fans out to (bounds relay-side
+# load). Must be > 0. Default: DEFAULT_NIP65_MAX_WRITE_RELAYS.
+nip65_max_write_relays = 3
+
+# Routing threshold: a relay whose continuous health score drops below this is
+# skipped in the fan-out unless a periodic probe is due. Must be in [0, 1].
+# Default: DEFAULT_RELAY_HEALTH_THRESHOLD.
+relay_health_threshold = 0.25
+
+# Per-relay concurrency cap. Effective concurrency scales DOWN from this with
+# the relay's health score (a degraded relay keeps at least one probe slot).
+# Must be > 0. Default: DEFAULT_PER_RELAY_CONCURRENCY.
+per_relay_concurrency = 4
+
+# EWMA smoothing factor for the per-relay health score: smaller reacts more
+# slowly (more memory), larger reacts faster. Must be in (0, 1].
+# Default: DEFAULT_HEALTH_ALPHA.
+health_alpha = 0.3
