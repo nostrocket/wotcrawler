@@ -40,3 +40,303 @@ pub mod loop_;
 /// See [`sampler::sample_gauges`], [`sampler::progress_summary`],
 /// [`sampler::staleness_timer`], [`sampler::in_run_reclaim_timer`].
 pub mod sampler;
+
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+use std::time::Duration;
+
+use nostr_sdk::{Kind, PublicKey, Timestamp};
+use tokio_util::sync::CancellationToken;
+
+use crate::daemon::config::Config;
+use crate::relay::nip11::{LimitCache, DEFAULT_MAX_LIMIT};
+use crate::relay::rate_limit::{
+    RateLimiterRegistry, DEFAULT_BACKOFF_BASE, DEFAULT_BACKOFF_CAP,
+};
+use crate::relay::{connect_curated, fetch, spawn_notice_consumer, ReconnectPolicy};
+
+/// The kind-3 follow-list event the crawler fetches (CRAWL / D-08). The whole
+/// project is built around kind:3 contact lists; this is the only kind solicited.
+const WANT_KIND: Kind = Kind::ContactList;
+
+/// Reject any follow-list event dated more than this many seconds into the
+/// future (ingest future-clamp, T-02-…): a relay cannot post-date an event to
+/// win newest-wins forever. One hour of clock skew is generous. Mirrors the
+/// value the Phase 3 crawl tests exercise.
+const FUTURE_CLAMP_SECS: u64 = 3_600;
+
+/// Upper bound on the number of followees accepted from a single follow list
+/// (ingest follow-cap). Mirrors the Phase 3 crawl tests; far above any honest
+/// follow count, but bounds a hostile oversized list.
+const FOLLOW_CAP: usize = 10_000;
+
+/// Max authors solicited per relay REQ window (author-chunking, RELAY-03). The
+/// per-relay fetch chunks the batch's authors under this cap; sized at the
+/// default NIP-11 `max_limit` so one batch maps to roughly one window set.
+const MAX_AUTHORS_PER_REQ: usize = DEFAULT_MAX_LIMIT;
+
+/// Total wall-clock budget for the graceful-shutdown drain (Pitfall 8 / T-04-12):
+/// once cancellation fires, the loop + timers are joined under this timeout so a
+/// single stuck task can never hang the process forever.
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Boot and run the full crawler daemon to graceful shutdown (OPS-01 / OPS-02).
+///
+/// Bootstrap order is load-bearing (RESEARCH §Architecture, Pitfall 1):
+/// 1. [`observe::init_tracing`] — install the subscriber before the first span.
+/// 2. [`observe::install_metrics`] — install the Prometheus recorder BEFORE any
+///    `metrics::*!` fires; the six existing counter sites become live here.
+/// 3. [`crate::store::connect`] + [`crate::store::run_migrations`] — open the
+///    pool and bring the schema current. The `database_url` is NEVER logged
+///    (T-04-13).
+/// 4. A shared [`CancellationToken`] + `loop_alive` flag.
+/// 5. A signal task (SIGTERM/SIGINT → `token.cancel()`) — RESEARCH shutdown wiring.
+/// 6. The production `fetch_union`: a connected curated pool + a shared
+///    [`RateLimiterRegistry`] + a [`LimitCache`], whose closure fans out the RAW
+///    [`fetch::fetch_complete`] per curated relay and CONCATENATES the raw events
+///    (D-08 single-ingest-over-union — NEVER ingest per relay; `process_batch`
+///    runs one ingest pass over the whole union).
+/// 7. The axum `/metrics` + `/health/*` server, bound to `cfg.metrics_addr`, with
+///    `with_graceful_shutdown` tied to the same token.
+/// 8. The long-running tasks (continuous loop + sampler + progress summary +
+///    staleness scan + in-run reclaim), each holding a clone of the token.
+///
+/// On cancel the loop stops claiming and drains in-flight workers (zero orphaned
+/// `in_progress` leases — OPS-02); the server shuts down gracefully; the timers
+/// stop; all are joined under [`SHUTDOWN_TIMEOUT`] so a stuck task cannot hang
+/// shutdown (Pitfall 8). Returns `Ok(())` on a clean exit.
+pub async fn run(cfg: Config) -> anyhow::Result<()> {
+    // (1) Tracing first so every subsequent line is structured (OBS-02).
+    observe::init_tracing(&cfg.log_level, cfg.log_format);
+
+    // Redacted config echo — `Config`'s Debug redacts `database_url` (T-04-13).
+    tracing::info!(config = ?cfg, "crawler daemon starting");
+
+    // (2) Install the Prometheus recorder BEFORE any metric fires (Pitfall 1).
+    let handle = observe::install_metrics();
+
+    // (3) Connect + migrate. The DB URL is never logged (T-04-13).
+    let pool = crate::store::connect(&cfg.database_url).await?;
+    crate::store::run_migrations(&pool).await?;
+    tracing::info!("database connected and migrations applied");
+
+    // (4) Shared cancellation token + loop-alive readiness flag.
+    let token = CancellationToken::new();
+    let loop_alive = Arc::new(AtomicBool::new(false));
+
+    // (5) Signal listener: SIGTERM/SIGINT → cancel the shared token (OPS-02).
+    {
+        let token = token.clone();
+        tokio::spawn(async move {
+            #[cfg(unix)]
+            {
+                use tokio::signal::unix::{signal, SignalKind};
+                let mut term =
+                    signal(SignalKind::terminate()).expect("install SIGTERM handler");
+                let mut int =
+                    signal(SignalKind::interrupt()).expect("install SIGINT handler");
+                tokio::select! {
+                    _ = term.recv() => tracing::info!("received SIGTERM"),
+                    _ = int.recv() => tracing::info!("received SIGINT"),
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = tokio::signal::ctrl_c().await;
+                tracing::info!("received Ctrl-C");
+            }
+            tracing::info!("cancellation requested — beginning graceful shutdown");
+            token.cancel();
+        });
+    }
+
+    // (6) Production fetch_union. Connect the curated pool with the reconnect
+    // policy (RELAY-01), build the shared rate-limiter registry + NIP-11 cache,
+    // and spawn the notice consumer so rate-limited/blocked notices escalate the
+    // SAME per-relay counters the fetch gate consults (RELAY-04).
+    let client = connect_curated(&cfg.relays, ReconnectPolicy::crawler_default()).await?;
+    let reqs_per_second = std::num::NonZeroU32::new(cfg.reqs_per_second)
+        .ok_or_else(|| anyhow::anyhow!("reqs_per_second must be > 0"))?;
+    let registry = Arc::new(RateLimiterRegistry::with_params(
+        reqs_per_second,
+        DEFAULT_BACKOFF_BASE,
+        DEFAULT_BACKOFF_CAP,
+    ));
+    let _notice_consumer = spawn_notice_consumer(client.clone(), Arc::clone(&registry));
+    let limit_cache = Arc::new(LimitCache::new());
+
+    // The closure fans out the RAW fetch per curated relay and CONCATENATES the
+    // raw events (D-08): `process_batch` runs ONE ingest pass over the whole
+    // cross-relay union, so a relay cannot split a pubkey's events across relays
+    // to defeat newest-wins. We use `fetch::fetch_complete` (the raw seam that
+    // `acquire_validated_lists_client` wraps) so NO ingest happens per relay.
+    let fetch_union = {
+        let client = client.clone();
+        let relays = cfg.relays.clone();
+        let registry = Arc::clone(&registry);
+        let limit_cache = Arc::clone(&limit_cache);
+        let fetch_timeout = cfg.fetch_timeout;
+        move |batch: Vec<crate::crawl::frontier::ClaimedAuthor>| {
+            let client = client.clone();
+            let relays = relays.clone();
+            let registry = Arc::clone(&registry);
+            let limit_cache = Arc::clone(&limit_cache);
+            async move {
+                // The set of authors this batch solicited.
+                let authors: Vec<PublicKey> = batch
+                    .iter()
+                    .filter_map(|c| PublicKey::from_slice(&c.pubkey).ok())
+                    .collect();
+                if authors.is_empty() {
+                    return Ok(Vec::new());
+                }
+
+                // Fan out per curated relay, concatenating raw events. Each relay's
+                // effective per-window cap is sourced from its NIP-11 limits
+                // (RELAY-02); a per-relay fetch failure surfaces as RelayError so the
+                // batch requeues rather than being treated as complete (D-09).
+                let mut union: Vec<nostr_sdk::Event> = Vec::new();
+                for relay_url in &relays {
+                    let max_limit = limit_cache.get_or_fetch(relay_url).await.max_limit;
+                    let events = fetch::fetch_complete_with_timeout(
+                        &client,
+                        relay_url,
+                        &authors,
+                        WANT_KIND,
+                        max_limit,
+                        MAX_AUTHORS_PER_REQ,
+                        fetch_timeout,
+                        &registry,
+                    )
+                    .await?;
+                    // A fully-successful per-relay fetch clears that relay's backoff.
+                    registry.reset(relay_url);
+                    union.extend(events);
+                }
+                Ok::<_, crate::error::RelayError>(union)
+            }
+        }
+    };
+
+    // (7) axum observability server bound to cfg.metrics_addr (OBS-01/03), with
+    // graceful shutdown tied to the same token (Pitfall 8 — handlers are fast and
+    // the /health/ready DB ping is timeout-bounded).
+    let state = observe::AppState::new(handle, Arc::clone(&loop_alive), pool.clone());
+    let listener = tokio::net::TcpListener::bind(cfg.metrics_addr).await?;
+    tracing::info!(addr = %cfg.metrics_addr, "observability server listening");
+    let server = {
+        let token = token.clone();
+        axum::serve(listener, observe::router(state)).with_graceful_shutdown(async move {
+            token.cancelled().await;
+        })
+    };
+
+    // (8) Spawn the long-running tasks, each holding a clone of the token.
+    let anchor_bytes = PublicKey::parse(&cfg.anchor_pubkey)
+        .map_err(|e| anyhow::anyhow!("invalid anchor_pubkey: {e}"))?
+        .to_bytes()
+        .to_vec();
+
+    let loop_task = {
+        let pool = pool.clone();
+        let token = token.clone();
+        let loop_alive = Arc::clone(&loop_alive);
+        let batch_size = cfg.batch_size;
+        let concurrency = cfg.concurrency;
+        let max_attempts = cfg.max_attempts;
+        let idle_poll_interval = cfg.idle_poll_interval;
+        tokio::spawn(async move {
+            loop_::run_daemon_loop(
+                &pool,
+                &anchor_bytes,
+                batch_size,
+                concurrency,
+                WANT_KIND,
+                Timestamp::now(),
+                FUTURE_CLAMP_SECS,
+                FOLLOW_CAP,
+                max_attempts,
+                idle_poll_interval,
+                token,
+                loop_alive,
+                fetch_union,
+            )
+            .await
+        })
+    };
+
+    let sampler_task = {
+        let pool = pool.clone();
+        let registry = Arc::clone(&registry);
+        let relays = cfg.relays.clone();
+        let token = token.clone();
+        let interval = cfg.progress_interval;
+        tokio::spawn(async move {
+            sampler::sample_gauges(pool, registry, relays, token, interval).await
+        })
+    };
+
+    let progress_task = {
+        let pool = pool.clone();
+        let token = token.clone();
+        let interval = cfg.progress_interval;
+        tokio::spawn(async move { sampler::progress_summary(pool, token, interval).await })
+    };
+
+    let staleness_task = {
+        let pool = pool.clone();
+        let ttl_secs = cfg.ttl.as_secs() as i64;
+        let interval = cfg.staleness_scan_interval;
+        let token = token.clone();
+        tokio::spawn(
+            async move { sampler::staleness_timer(pool, ttl_secs, interval, token).await },
+        )
+    };
+
+    let reclaim_task = {
+        let pool = pool.clone();
+        let age_secs = cfg.reclaim_age.as_secs() as i64;
+        let interval = cfg.reclaim_interval;
+        let token = token.clone();
+        tokio::spawn(async move {
+            sampler::in_run_reclaim_timer(pool, age_secs, interval, token).await
+        })
+    };
+
+    // Await the axum server (it returns once graceful shutdown completes on
+    // token-cancel). A server bind/serve error is surfaced; the loop's crawl
+    // result is checked after the bounded drain.
+    server.await?;
+    tracing::info!("observability server shut down; draining tasks");
+
+    // Bounded graceful drain (Pitfall 8 / T-04-12): join every task under a total
+    // timeout so a stuck task cannot hang shutdown forever. The loop's drain leaves
+    // zero orphaned `in_progress` leases (OPS-02).
+    let drain = async {
+        match loop_task.await {
+            Ok(Ok(stats)) => tracing::info!(
+                batches = stats.batches_processed,
+                authors = stats.authors_claimed,
+                reclaimed_on_startup = stats.reclaimed_on_startup,
+                "crawl loop drained cleanly"
+            ),
+            Ok(Err(e)) => tracing::error!(error = %e, "crawl loop ended with error"),
+            Err(e) => tracing::error!(error = %e, "crawl loop task panicked"),
+        }
+        // The timer tasks return `()`; join them so they stop cleanly.
+        let _ = sampler_task.await;
+        let _ = progress_task.await;
+        let _ = staleness_task.await;
+        let _ = reclaim_task.await;
+    };
+
+    match tokio::time::timeout(SHUTDOWN_TIMEOUT, drain).await {
+        Ok(()) => tracing::info!("graceful shutdown complete"),
+        Err(_) => tracing::warn!(
+            timeout_secs = SHUTDOWN_TIMEOUT.as_secs(),
+            "shutdown drain exceeded its budget — exiting anyway (a task was stuck)"
+        ),
+    }
+
+    Ok(())
+}
