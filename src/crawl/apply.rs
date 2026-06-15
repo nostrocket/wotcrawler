@@ -326,9 +326,19 @@ where
             if let Some(vrl) = resolve_relay_list(raw, author, now, future_clamp_secs) {
                 let pubkey_id = upsert_pubkey(pool, &author.to_bytes()).await?;
                 apply_relay_list(pool, pubkey_id, &vrl.relays, vrl.created_at).await?;
+                // Re-read against the SAME id we just persisted into (WR-02),
+                // not `claimed.id`: `apply_relay_list` keyed the rows by
+                // `pubkey_id`, so looking them up by the freshly-upserted id
+                // makes the provenance explicit and is robust to any future
+                // upsert-path change that could return a different id.
+                write_relays = lookup_write_relays(pool, pubkey_id).await?;
             }
         }
-        write_relays = lookup_write_relays(pool, claimed.id).await?;
+        // Fallback re-read (no winner persisted, or none resolved): query by the
+        // claimed id, which already exists for a claimed author.
+        if write_relays.is_empty() {
+            write_relays = lookup_write_relays(pool, claimed.id).await?;
+        }
     }
 
     if write_relays.is_empty() {
