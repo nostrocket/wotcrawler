@@ -17,10 +17,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use nostr_sdk::Kind;
+use nostr_sdk::{Kind, PublicKey};
 use tokio_util::sync::CancellationToken;
 use web_of_trust::crawl::frontier::seed_anchor;
 use web_of_trust::daemon::loop_::run_daemon_loop;
+use web_of_trust::relay::health::{RelayHealthRegistry, DEFAULT_HEALTH_ALPHA};
 use web_of_trust::daemon::sampler::frontier_counts;
 use web_of_trust::store::pubkeys::upsert_pubkey;
 
@@ -83,6 +84,14 @@ async fn graceful_drain_no_orphan_leases() -> anyhow::Result<()> {
             loop_token,
             loop_alive_h,
             graph.fetch_fn(),
+            // Fallback disabled for these loop-control tests (the live NIP-65
+            // recovery path is exercised in tests/nip65_fallback.rs): a fresh
+            // registry + no-op closures keep behavior identical to before 05-04.
+            false,
+            web_of_trust::relay::health::DEFAULT_NIP65_MAX_WRITE_RELAYS,
+            Arc::new(RelayHealthRegistry::new(DEFAULT_HEALTH_ALPHA)),
+            |_pk: PublicKey, _relays: Vec<String>| std::future::ready(Ok(Vec::new())),
+            |_pk: PublicKey| std::future::ready(Ok(Vec::new())),
         )
         .await
     });
@@ -168,6 +177,14 @@ async fn idle_then_resume_after_reenqueue() -> anyhow::Result<()> {
             loop_token,
             loop_alive_h,
             graph.fetch_fn(),
+            // Fallback disabled for these loop-control tests (the live NIP-65
+            // recovery path is exercised in tests/nip65_fallback.rs): a fresh
+            // registry + no-op closures keep behavior identical to before 05-04.
+            false,
+            web_of_trust::relay::health::DEFAULT_NIP65_MAX_WRITE_RELAYS,
+            Arc::new(RelayHealthRegistry::new(DEFAULT_HEALTH_ALPHA)),
+            |_pk: PublicKey, _relays: Vec<String>| std::future::ready(Ok(Vec::new())),
+            |_pk: PublicKey| std::future::ready(Ok(Vec::new())),
         )
         .await
     });
@@ -315,6 +332,14 @@ async fn terminal_stamp_reflects_fetch_time_not_spawn() -> anyhow::Result<()> {
             loop_token,
             loop_alive_h,
             graph.fetch_fn(),
+            // Fallback disabled for these loop-control tests (the live NIP-65
+            // recovery path is exercised in tests/nip65_fallback.rs): a fresh
+            // registry + no-op closures keep behavior identical to before 05-04.
+            false,
+            web_of_trust::relay::health::DEFAULT_NIP65_MAX_WRITE_RELAYS,
+            Arc::new(RelayHealthRegistry::new(DEFAULT_HEALTH_ALPHA)),
+            |_pk: PublicKey, _relays: Vec<String>| std::future::ready(Ok(Vec::new())),
+            |_pk: PublicKey| std::future::ready(Ok(Vec::new())),
         )
         .await
     });

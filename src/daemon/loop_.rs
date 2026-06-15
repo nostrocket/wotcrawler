@@ -63,7 +63,7 @@ use crate::relay::health::RelayHealthRegistry;
 /// The injected `fetch_union` closure has the SAME bounds as `run_crawl`'s
 /// (`Clone + Send + Sync + 'static`): each spawned worker gets its own handle.
 #[allow(clippy::too_many_arguments)]
-pub async fn run_daemon_loop<F, Fut>(
+pub async fn run_daemon_loop<F, Fut, FB, FutB, RL, FutR>(
     pool: &PgPool,
     anchor_pubkey: &[u8],
     batch_size: i64,
@@ -76,10 +76,19 @@ pub async fn run_daemon_loop<F, Fut>(
     token: CancellationToken,
     loop_alive: Arc<AtomicBool>,
     fetch_union: F,
+    fallback_enabled: bool,
+    nip65_max_write_relays: usize,
+    health: Arc<RelayHealthRegistry>,
+    fallback_fetch: FB,
+    relay_list_fetch: RL,
 ) -> Result<CrawlStats, StoreError>
 where
     F: Fn(Vec<ClaimedAuthor>) -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = Result<Vec<Event>, RelayError>> + Send + 'static,
+    FB: Fn(PublicKey, Vec<String>) -> FutB + Clone + Send + Sync + 'static,
+    FutB: Future<Output = Result<Vec<Event>, RelayError>> + Send + 'static,
+    RL: Fn(PublicKey) -> FutR + Clone + Send + Sync + 'static,
+    FutR: Future<Output = Result<Vec<Event>, RelayError>> + Send + 'static,
 {
     // Startup: seed the anchor (D-03) then reclaim crash orphans (D-06) — reused
     // verbatim from run_crawl.
@@ -99,15 +108,12 @@ where
     let sem = Arc::new(Semaphore::new(concurrency));
     let mut workers: Vec<tokio::task::JoinHandle<Result<(), StoreError>>> = Vec::new();
 
-    // RELAY-05 NIP-65 write-relay fallback wiring (live fallback closures sourced
-    // from the connected Client + the daemon's health registry, plus the config
-    // toggle/cap) lands with the health-driven fan-out in 05-04. For now the loop
-    // passes `fallback_enabled = false` with a fresh empty health registry and
-    // no-op fallback closures so `process_batch` skips the fallback path and the
-    // production loop behaves exactly as before.
-    let health = Arc::new(RelayHealthRegistry::new(
-        crate::relay::health::DEFAULT_HEALTH_ALPHA,
-    ));
+    // RELAY-05/06: the live NIP-65 fallback wiring is now threaded in from the
+    // daemon (05-04) — `fallback_enabled`/`nip65_max_write_relays` config, the
+    // SHARED `health` registry (same binding the fan-out + notice consumer use),
+    // and the live-Client `fallback_fetch`/`relay_list_fetch` closures. Each
+    // spawned batch clones these so `process_batch` can recover a curated-miss
+    // author from its write relays (apply.rs stays Client-free).
 
     // Run the loop + drain in an inner block so `loop_alive` is flipped back to
     // `false` on EVERY exit — clean shutdown OR an early `?` error (WR-03 / OBS-03:
@@ -152,6 +158,8 @@ where
 
         let pool = pool.clone();
         let fetch_union = fetch_union.clone();
+        let fallback_fetch = fallback_fetch.clone();
+        let relay_list_fetch = relay_list_fetch.clone();
         let health = Arc::clone(&health);
         let handle = tokio::spawn(async move {
             // Hold the permit for the whole batch; dropping it frees a slot. The
@@ -189,13 +197,14 @@ where
                 future_clamp_secs,
                 follow_cap,
                 max_attempts,
-                false, // fallback wiring lands in 05-04
-                crate::relay::health::DEFAULT_NIP65_MAX_WRITE_RELAYS,
+                fallback_enabled,
+                nip65_max_write_relays,
                 &health,
                 || fetch_timed,
-                // No-op fallback closures (never invoked when fallback disabled).
-                |_pk: PublicKey, _relays: Vec<String>| std::future::ready(Ok(Vec::new())),
-                |_pk: PublicKey| std::future::ready(Ok(Vec::new())),
+                // Live-Client NIP-65 fallback closures (RELAY-05/06): kind-3 from
+                // write relays + the on-demand plain curated kind:10002 resolve.
+                fallback_fetch,
+                relay_list_fetch,
             )
             .await
             .map(|_applied| ())

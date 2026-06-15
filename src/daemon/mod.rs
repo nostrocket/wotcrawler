@@ -301,6 +301,88 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
         }
     };
 
+    // RELAY-05 live-Client fallback closures (threaded into `process_batch` via
+    // `run_daemon_loop`). These own the ONLY references to the live `Client` so
+    // the crawl layer (`crawl/apply.rs`) stays Client-free (no circular dep,
+    // ScriptedGraph-testable). They reuse the SAME GCRA-gated per-relay fetch path
+    // as the fan-out; they do NOT duplicate the health routing/admission of the
+    // fan-out (the fan-out is the only routing site).
+
+    // `fallback_fetch(author, write_relays)`: fetch kind-3 for one author from its
+    // NIP-65 write relays, concatenating the raw events for one single-author
+    // re-validation pass (apply.rs runs the full verify/dedup/newest-wins gate).
+    let fallback_fetch = {
+        let client = client.clone();
+        let registry = Arc::clone(&registry);
+        let limit_cache = Arc::clone(&limit_cache);
+        let fetch_timeout = cfg.fetch_timeout;
+        move |author: PublicKey, write_relays: Vec<String>| {
+            let client = client.clone();
+            let registry = Arc::clone(&registry);
+            let limit_cache = Arc::clone(&limit_cache);
+            async move {
+                let authors = [author];
+                let mut union: Vec<nostr_sdk::Event> = Vec::new();
+                for relay_url in &write_relays {
+                    let max_limit = limit_cache.get_or_fetch(relay_url).await.max_limit;
+                    let events = fetch::fetch_complete_with_timeout(
+                        &client,
+                        relay_url,
+                        &authors,
+                        WANT_KIND,
+                        max_limit,
+                        MAX_AUTHORS_PER_REQ,
+                        fetch_timeout,
+                        &registry,
+                    )
+                    .await?;
+                    union.extend(events);
+                }
+                Ok::<_, crate::error::RelayError>(union)
+            }
+        }
+    };
+
+    // `relay_list_fetch(author)`: a PLAIN curated kind:10002 fetch (NOT routed back
+    // through the kind-3 fallback — no recursion, Pitfall 4). apply.rs re-resolves
+    // the winner's r-tags and persists them (the sole persist-on-winner hook).
+    let relay_list_fetch = {
+        let client = client.clone();
+        let relays = cfg.relays.clone();
+        let registry = Arc::clone(&registry);
+        let limit_cache = Arc::clone(&limit_cache);
+        let fetch_timeout = cfg.fetch_timeout;
+        move |author: PublicKey| {
+            let client = client.clone();
+            let relays = relays.clone();
+            let registry = Arc::clone(&registry);
+            let limit_cache = Arc::clone(&limit_cache);
+            async move {
+                let authors = [author];
+                let mut union: Vec<nostr_sdk::Event> = Vec::new();
+                for relay_url in &relays {
+                    let max_limit = limit_cache.get_or_fetch(relay_url).await.max_limit;
+                    let events = fetch::fetch_complete_with_timeout(
+                        &client,
+                        relay_url,
+                        &authors,
+                        Kind::RelayList,
+                        max_limit,
+                        MAX_AUTHORS_PER_REQ,
+                        fetch_timeout,
+                        &registry,
+                    )
+                    .await?;
+                    union.extend(events);
+                }
+                Ok::<_, crate::error::RelayError>(union)
+            }
+        }
+    };
+
+    let fallback_enabled = cfg.nip65_fallback_enabled;
+    let nip65_max_write_relays = cfg.nip65_max_write_relays;
+
     // (7) axum observability server bound to cfg.metrics_addr (OBS-01/03), with
     // graceful shutdown tied to the same token (Pitfall 8 — handlers are fast and
     // the /health/ready DB ping is timeout-bounded).
@@ -324,6 +406,7 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
         let pool = pool.clone();
         let token = token.clone();
         let loop_alive = Arc::clone(&loop_alive);
+        let health = Arc::clone(&health);
         let batch_size = cfg.batch_size;
         let concurrency = cfg.concurrency;
         let max_attempts = cfg.max_attempts;
@@ -342,6 +425,11 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
                 token,
                 loop_alive,
                 fetch_union,
+                fallback_enabled,
+                nip65_max_write_relays,
+                health,
+                fallback_fetch,
+                relay_list_fetch,
             )
             .await
         })
