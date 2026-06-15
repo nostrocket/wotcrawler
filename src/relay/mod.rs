@@ -14,6 +14,7 @@
 //! plan 02-01; plan 02-03 fills them.
 
 pub mod fetch;
+pub mod health;
 pub mod nip11;
 pub mod rate_limit;
 
