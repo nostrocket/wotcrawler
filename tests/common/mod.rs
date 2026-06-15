@@ -18,7 +18,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use nostr_sdk::{Event, EventBuilder, Keys, Kind, PublicKey, SecretKey, Tag, Timestamp};
+use nostr_sdk::nips::nip65::RelayMetadata;
+use nostr_sdk::{Event, EventBuilder, Keys, Kind, PublicKey, RelayUrl, SecretKey, Tag, Timestamp};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::ContainerAsync;
 use testcontainers_modules::postgres::Postgres;
@@ -147,10 +148,46 @@ pub fn future_dated_event(signer: &Keys, kind: Kind, seconds_ahead: u64) -> Even
 /// (and the Phase 4 daemon loop) expects: given an owned claimed batch it produces
 /// the raw `Vec<Event>` union for those authors (modeling D-08's cross-relay union
 /// before the single ingest pass).
+///
+/// Phase 5 (RELAY-05/06) extends this with two capabilities the fallback +
+/// health-routing plans need:
+/// - **relay-URL-aware** placement: events can be scripted to appear only on a
+///   specific relay url (e.g. "author absent on curated relay A, present on
+///   write relay B"), via [`ScriptedGraph::with_relay`]. The original
+///   author-keyed [`ScriptedGraph::union_for`]/[`ScriptedGraph::fetch_fn`]
+///   behavior is preserved unchanged for callers that ignore relay url.
+/// - **error injection**: a registered relay url returns
+///   `Err(RelayError::FetchTimeout(url))` (or `Err(RelayError::RelayNotFound)`,
+///   a `Client`-shaped failure) from the relay-aware fetch closure, exercising
+///   the health/timeout capture sites, via [`ScriptedGraph::fail_relay`].
+///
+/// Still `Arc`-backed + `Send + Clone + Sync + 'static` — it crosses
+/// `tokio::spawn` in the daemon loop.
+/// (relay_url, author pubkey bytes) -> the events that relay returns for that
+/// author. Keyed map backing [`ScriptedGraph`]'s relay-URL-aware placement.
+type RelayPlacements = HashMap<(String, Vec<u8>), Vec<Event>>;
+
 #[derive(Clone)]
 pub struct ScriptedGraph {
-    /// author pubkey bytes -> the signed kind-3 event that author publishes.
+    /// author pubkey bytes -> the signed event that author publishes on the
+    /// curated union (relay-url-agnostic back-compat path).
     events: Arc<HashMap<Vec<u8>, Event>>,
+    /// (relay_url, author pubkey bytes) -> the events that relay returns for
+    /// that author. Models per-relay placement (RELAY-05 fallback tests).
+    by_relay: Arc<RelayPlacements>,
+    /// relay_url -> the error this relay injects instead of returning events
+    /// (RELAY-06 health/timeout capture tests).
+    failures: Arc<HashMap<String, RelayFailure>>,
+}
+
+/// The error a designated relay injects from the relay-aware fetch closure.
+#[derive(Clone, Copy, Debug)]
+pub enum RelayFailure {
+    /// Inject `RelayError::FetchTimeout(url)` (the explicit per-fetch timeout).
+    Timeout,
+    /// Inject `RelayError::RelayNotFound(url)` (a connect-shaped failure that a
+    /// caller maps to a connect/client failure for health scoring).
+    NotFound,
 }
 
 impl ScriptedGraph {
@@ -161,7 +198,39 @@ impl ScriptedGraph {
             .collect();
         Self {
             events: Arc::new(map),
+            by_relay: Arc::new(HashMap::new()),
+            failures: Arc::new(HashMap::new()),
         }
+    }
+
+    /// Build a relay-URL-aware graph: `placements` maps a relay url to the
+    /// events that relay returns. An author present on relay B but absent from
+    /// the curated `events` union models the RELAY-05 fallback scenario.
+    pub fn with_relay(placements: Vec<(&str, Vec<Event>)>) -> Self {
+        let mut by_relay: RelayPlacements = HashMap::new();
+        for (url, events) in placements {
+            for e in events {
+                by_relay
+                    .entry((url.to_string(), e.pubkey.to_bytes().to_vec()))
+                    .or_default()
+                    .push(e);
+            }
+        }
+        Self {
+            events: Arc::new(HashMap::new()),
+            by_relay: Arc::new(by_relay),
+            failures: Arc::new(HashMap::new()),
+        }
+    }
+
+    /// Register a relay url that injects `failure` instead of returning events
+    /// from [`ScriptedGraph::relay_fetch`]. Consumes + returns self so it chains
+    /// after [`ScriptedGraph::with_relay`]/[`ScriptedGraph::new`].
+    pub fn fail_relay(mut self, relay_url: &str, failure: RelayFailure) -> Self {
+        let mut map = (*self.failures).clone();
+        map.insert(relay_url.to_string(), failure);
+        self.failures = Arc::new(map);
+        self
     }
 
     /// Build the raw cross-relay union for a claimed batch: every scripted event
@@ -172,6 +241,30 @@ impl ScriptedGraph {
             .iter()
             .filter_map(|c| self.events.get(&c.pubkey).cloned())
             .collect()
+    }
+
+    /// Relay-aware fetch: return the events `relay_url` holds for `batch`'s
+    /// authors, or the injected error if `relay_url` is a registered failure.
+    /// A relay that simply has no events for an author returns an empty union
+    /// (modeling a miss-on-that-relay).
+    pub fn relay_fetch(
+        &self,
+        relay_url: &str,
+        batch: &[ClaimedAuthor],
+    ) -> Result<Vec<Event>, RelayError> {
+        if let Some(failure) = self.failures.get(relay_url) {
+            return Err(match failure {
+                RelayFailure::Timeout => RelayError::FetchTimeout(relay_url.to_string()),
+                RelayFailure::NotFound => RelayError::RelayNotFound(relay_url.to_string()),
+            });
+        }
+        let mut out = Vec::new();
+        for c in batch {
+            if let Some(events) = self.by_relay.get(&(relay_url.to_string(), c.pubkey.clone())) {
+                out.extend(events.iter().cloned());
+            }
+        }
+        Ok(out)
     }
 
     /// A `fetch_union` closure for `run_crawl` / the daemon loop (no instrumentation).
@@ -185,6 +278,22 @@ impl ScriptedGraph {
         let me = self.clone();
         move |batch: Vec<ClaimedAuthor>| std::future::ready(Ok(me.union_for(&batch)))
     }
+
+    /// A relay-URL-keyed fetch closure for the fallback path: given a relay url
+    /// and a claimed batch it returns that relay's scripted events (or the
+    /// injected error). `Send + Clone + Sync + 'static` so it crosses spawns.
+    pub fn relay_fetch_fn(
+        &self,
+    ) -> impl Fn(String, Vec<ClaimedAuthor>) -> std::future::Ready<Result<Vec<Event>, RelayError>>
+           + Clone
+           + Send
+           + Sync
+           + 'static {
+        let me = self.clone();
+        move |relay_url: String, batch: Vec<ClaimedAuthor>| {
+            std::future::ready(me.relay_fetch(&relay_url, &batch))
+        }
+    }
 }
 
 /// Build a signed kind-3 event for `author` (seed) following each `followees`
@@ -194,6 +303,34 @@ pub fn follows_event(author_seed: u8, followees: &[u8], created_at: u64) -> Even
     let author = keys(author_seed);
     let p_tags: Vec<PublicKey> = followees.iter().map(|&s| keys(s).public_key()).collect();
     signed_event(&author, Kind::ContactList, Timestamp::from_secs(created_at), &p_tags)
+}
+
+/// Build a signed kind:10002 (NIP-65 RelayList) event for `author_seed` whose
+/// r-tags advertise each `(url, marker)` pair, dated `created_at`.
+///
+/// `marker` is one of `"read"`, `"write"`, `"both"` (or any empty string for a
+/// bare r-tag); `"both"`/empty produce a bare r-tag with NO read/write token,
+/// which NIP-65 (and `nip65::extract_relay_list`) treats as both read+write.
+/// Tags are built via the canonical `Tag::relay_metadata` constructor (never
+/// hand-assembled), so a round-trip through `ingest::relay_list::extract_relay_pairs`
+/// yields the same pairs (with `both`/empty normalizing back to `"both"`).
+pub fn relay_list_event(author_seed: u8, relays: &[(&str, &str)], created_at: u64) -> Event {
+    let author = keys(author_seed);
+    let tags = relays.iter().map(|(url, marker)| {
+        let relay_url = RelayUrl::parse(url).expect("fixture relay url must parse");
+        let metadata = match *marker {
+            "read" => Some(RelayMetadata::Read),
+            "write" => Some(RelayMetadata::Write),
+            // "both" or "" -> bare r-tag (no marker token) = read+write.
+            _ => None,
+        };
+        Tag::relay_metadata(relay_url, metadata)
+    });
+    EventBuilder::new(Kind::RelayList, "")
+        .tags(tags)
+        .custom_created_at(Timestamp::from_secs(created_at))
+        .sign_with_keys(&author)
+        .expect("signing a relay-list fixture event must succeed")
 }
 
 /// Deterministic 32-byte pubkey from a single seed (mirrors concurrency::pk).
