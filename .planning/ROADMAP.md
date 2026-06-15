@@ -189,4 +189,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Relay Acquisition & Validation | 12/12 | Complete    | 2026-06-13 |
 | 3. Graph Writer & BFS Frontier | 3/3 | Complete    | 2026-06-13 |
 | 4. Daemon, Staleness Loop & Observability | 5/5 | Complete    | 2026-06-15 |
-| 5. NIP-65 Outbox Routing & Relay Health | 4/4 | Complete   | 2026-06-15 |
+| 5. NIP-65 Outbox Routing & Relay Health | 4/4 | Complete    | 2026-06-15 |
