@@ -9,10 +9,12 @@
 //! SQLX_OFFLINE=true cargo test --test relay_health -- --test-threads=2
 //! ```
 
+use std::sync::Arc;
 use std::time::Duration;
 
+use tokio::sync::Semaphore;
 use web_of_trust::relay::health::{
-    RelayHealthRegistry, DEFAULT_HEALTH_ALPHA, DEFAULT_PER_RELAY_CONCURRENCY,
+    admit_per_relay, RelayHealthRegistry, DEFAULT_HEALTH_ALPHA, DEFAULT_PER_RELAY_CONCURRENCY,
     DEFAULT_RELAY_HEALTH_THRESHOLD,
 };
 
@@ -171,4 +173,116 @@ fn permits_scale_with_health() {
     assert_eq!(reg.in_use(RELAY), 2, "two in-flight admissions");
     reg.decr_in_use(RELAY);
     assert_eq!(reg.in_use(RELAY), 1, "one admission completed");
+}
+
+/// CR-02 regression: under concurrency, exactly ONE task may win the probe for a
+/// degraded relay per probe interval. The old `route_allowed` + `mark_attempt`
+/// pair released its lock between the read and the write, so every concurrent
+/// caller saw the probe as "due" and all of them probed at once. The atomic
+/// `try_mark_attempt` holds the `last_probe` lock across the read-and-claim, so
+/// only one caller returns `true`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn try_mark_attempt_single_probe_under_concurrency() {
+    let threshold = DEFAULT_RELAY_HEALTH_THRESHOLD;
+
+    // Drive the relay below threshold so routing is probe-gated. The relay has
+    // never been probed, so the FIRST caller to win claims the only probe slot
+    // for this interval.
+    let reg = Arc::new(RelayHealthRegistry::new(DEFAULT_HEALTH_ALPHA));
+    for _ in 0..20 {
+        reg.record_timeout(RELAY);
+    }
+    assert!(
+        reg.score(RELAY) < threshold,
+        "relay must be below threshold for the probe-gated path, got {}",
+        reg.score(RELAY)
+    );
+
+    // 32 concurrent callers race try_mark_attempt for the same degraded relay.
+    let mut handles = Vec::new();
+    for _ in 0..32 {
+        let reg = Arc::clone(&reg);
+        handles.push(tokio::spawn(
+            async move { reg.try_mark_attempt(RELAY, threshold) },
+        ));
+    }
+    let mut winners = 0usize;
+    for h in handles {
+        if h.await.expect("probe task did not panic") {
+            winners += 1;
+        }
+    }
+    assert_eq!(
+        winners, 1,
+        "exactly one concurrent caller may win the probe for a degraded relay, got {winners}"
+    );
+
+    // A healthy relay is always allowed (no probe gating) — every caller wins.
+    let healthy = Arc::new(RelayHealthRegistry::new(DEFAULT_HEALTH_ALPHA));
+    let mut handles = Vec::new();
+    for _ in 0..8 {
+        let healthy = Arc::clone(&healthy);
+        handles.push(tokio::spawn(
+            async move { healthy.try_mark_attempt(RELAY, threshold) },
+        ));
+    }
+    for h in handles {
+        assert!(
+            h.await.expect("task did not panic"),
+            "a healthy relay is always routable for every caller"
+        );
+    }
+}
+
+/// CR-01 regression: `admit_per_relay` must not live-lock under full saturation.
+///
+/// With the OLD ordering (acquire the semaphore permit BEFORE the in_use spin
+/// loop), `per_relay_concurrency` spinners would hold every permit while waiting
+/// for in_use to drop, but no in-flight fetch could complete to decrement it —
+/// because completing requires a permit that the spinners hold. The fix acquires
+/// the permit AFTER the in_use admission check, so a waiter never holds a permit
+/// while waiting. Many more tasks than permits all complete within a bounded
+/// timeout; a hang here is the live-lock.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn admit_per_relay_no_livelock_under_saturation() {
+    const PER_RELAY_CONCURRENCY: usize = 2;
+    const TASKS: usize = 16;
+
+    let health = Arc::new(RelayHealthRegistry::new(DEFAULT_HEALTH_ALPHA));
+    // The hard ceiling equals per_relay_concurrency, exactly as the daemon builds
+    // it — the worst case for the old permit-held-while-spinning ordering.
+    let sem = Arc::new(Semaphore::new(PER_RELAY_CONCURRENCY));
+
+    let mut handles = Vec::new();
+    for _ in 0..TASKS {
+        let health = Arc::clone(&health);
+        let sem = Arc::clone(&sem);
+        handles.push(tokio::spawn(async move {
+            admit_per_relay(&health, &sem, RELAY, PER_RELAY_CONCURRENCY, || async {
+                // A tiny amount of work so several tasks contend on the gate; the
+                // InUseGuard must drop (decrementing in_use) for waiters to proceed.
+                tokio::time::sleep(Duration::from_millis(2)).await;
+                Ok::<(), ()>(())
+            })
+            .await
+        }));
+    }
+
+    let all = async {
+        for h in handles {
+            h.await
+                .expect("admit task did not panic")
+                .expect("fetch closure is infallible here");
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(10), all)
+        .await
+        .expect("saturated admit_per_relay must complete (no live-lock)");
+
+    // Every guard dropped: the in-use count is back to zero, no slot leaked.
+    assert_eq!(
+        health.in_use(RELAY),
+        0,
+        "every InUseGuard dropped — no in-use slot leaked after saturation"
+    );
 }
