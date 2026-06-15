@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXTRACT(EPOCH FROM (now() - last_fetched_at))::double precision AS age_secs FROM pubkeys WHERE status IN ('fetched','not_found','failed') AND last_fetched_at IS NOT NULL ORDER BY last_fetched_at ASC LIMIT 1000",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "age_secs",
+        "type_info": "Float8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "eb827f08d8863ba35f5745b2841f1ea61e9b4129d1bc784bb9793fca18b6cfb8"
+}

@@ -33,3 +33,10 @@ pub mod observe;
 /// with idle-poll + a claim-boundary cancellation drain. See
 /// [`loop_::run_daemon_loop`]. (Named `loop_` because `loop` is a keyword.)
 pub mod loop_;
+
+/// Periodic observability + maintenance timers (OBS-01/04, FRESH-02, OPS-02):
+/// the gauge sampler, progress-summary logger, TTL staleness scan, and in-run
+/// stale-lease reclaim, each a coarse-interval task stopping on cancellation.
+/// See [`sampler::sample_gauges`], [`sampler::progress_summary`],
+/// [`sampler::staleness_timer`], [`sampler::in_run_reclaim_timer`].
+pub mod sampler;
