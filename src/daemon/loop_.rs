@@ -150,7 +150,21 @@ where
             // the next staleness scan and defeating FRESH-02. The success path
             // (`apply_follow_list`) uses SQL `now()` and is unaffected.
             let now = Timestamp::now();
-            let fut = fetch_union(batch.clone());
+            // Time the per-batch relay fetch and record it into the
+            // `fetch_duration_seconds` histogram (WR-01): the buckets are
+            // configured in observe::configured_builder but were never recorded,
+            // leaving the Grafana p95 panel permanently empty. We wrap the fetch
+            // future so the recorded span is exactly the relay round-trip (the
+            // closure `process_batch` invokes to obtain the fetch future), not the
+            // subsequent ingest/apply work.
+            let inner = fetch_union(batch.clone());
+            let fetch_timed = async move {
+                let t0 = std::time::Instant::now();
+                let result = inner.await;
+                metrics::histogram!(crate::daemon::observe::METRIC_FETCH_DURATION)
+                    .record(t0.elapsed().as_secs_f64());
+                result
+            };
             process_batch(
                 &pool,
                 &batch,
@@ -159,7 +173,7 @@ where
                 future_clamp_secs,
                 follow_cap,
                 max_attempts,
-                || fut,
+                || fetch_timed,
             )
             .await
             .map(|_applied| ())
