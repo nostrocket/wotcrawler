@@ -1,0 +1,78 @@
+# web-of-trust crawler daemon configuration (OPS-01).
+#
+# Load with:  crawler --config config.toml
+# Every value below can be overridden by a WOT__<FIELD> environment variable
+# (double-underscore for nesting), e.g. WOT__CONCURRENCY=16 or WOT__LOG_FORMAT=json.
+# Env vars win over this file; omitted optional fields fall back to the
+# DEFAULT_* constants compiled into the crawler.
+
+# --- Required ---------------------------------------------------------------
+
+# Anchor pubkey the crawl starts from (CRAWL-01). Hex or bech32 `npub...`.
+anchor_pubkey = "82341f882b6eabcd2ba7f1ef90aad961cf074af15b9ef44a09f9d2a8fbfbe6a2"
+
+# Curated relay set the crawler fetches follow lists from. Must be non-empty.
+relays = [
+  "wss://relay.damus.io",
+  "wss://nos.lol",
+  "wss://relay.nostr.band",
+]
+
+# Postgres connection URL. NEVER logged (the daemon redacts it in every log line).
+# May embed a password; prefer supplying it via WOT__DATABASE_URL in production.
+database_url = "postgres://crawler:changeme@localhost:5432/web_of_trust"
+
+# Uniform staleness TTL (FRESH-02): a follow list older than this is re-enqueued
+# for a fresh fetch. Must be > 0. humantime duration (e.g. "24h", "12h", "7d").
+ttl = "24h"
+
+# Bind address for the axum /metrics + /health/* server (OBS-01 / OBS-03).
+# SECURITY: binding to a public address exposes internal crawl topology — keep
+# this on a loopback/private interface and scrape it via a private network.
+metrics_addr = "127.0.0.1:9100"
+
+# --- Optional (defaults shown reference the compiled DEFAULT_* constants) ----
+
+# In-flight batch-fetch concurrency cap (CRAWL-04). Default: DEFAULT_CONCURRENCY.
+concurrency = 8
+
+# Authors claimed per worker batch (D-07). Default: DEFAULT_BATCH_SIZE.
+batch_size = 64
+
+# Transient-error fetch attempts before a pubkey is marked `failed` (D-09).
+# Default: DEFAULT_MAX_ATTEMPTS.
+max_attempts = 3
+
+# Per-fetch deadline. humantime duration. Default: DEFAULT_FETCH_TIMEOUT (30s).
+fetch_timeout = "30s"
+
+# Sustained per-relay outbound REQ rate, requests/second (politeness).
+# Default: DEFAULT_REQS_PER_SECOND.
+reqs_per_second = 4
+
+# Log level (tracing EnvFilter / RUST_LOG grammar). Default: "info".
+log_level = "info"
+
+# Log output format (OBS-02): "human" (default) or "json" for log shipping.
+log_format = "human"
+
+# --- Timers (all humantime durations) ---------------------------------------
+
+# Interval between periodic crawl-progress summaries logged during the crawl
+# (OBS-04: frontier size, fetch rate, coverage %).
+progress_interval = "60s"
+
+# Interval between TTL staleness scans that re-enqueue stale rows (FRESH-02).
+staleness_scan_interval = "5m"
+
+# Interval between in-run stale-lease reclaim sweeps (OPS-02).
+reclaim_interval = "60s"
+
+# Age threshold for the in-run reclaim sweep: only `in_progress` leases older
+# than this are reclaimed, so freshly-claimed live leases are never reset.
+# Keep this comfortably above fetch_timeout.
+reclaim_age = "5m"
+
+# Poll/sleep interval when the frontier is empty (the continuous loop idles
+# instead of exiting while the daemon is live).
+idle_poll_interval = "5s"
