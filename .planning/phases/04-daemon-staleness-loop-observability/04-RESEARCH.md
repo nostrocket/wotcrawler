@@ -636,8 +636,7 @@ fn validate(c: &Config) -> anyhow::Result<()> {
 | A4 | `metrics-exporter-prometheus` with `default-features = false` still exposes `install_recorder`/`set_buckets`/`render` | Installation | Low — these are core builder/handle methods, not gated by `http-listener`; confirm during planning. |
 | A5 | Rendering metrics from the shared axum server (vs the built-in listener) needs no extra crate beyond axum | Pattern 1, Alternatives | Low — verified by deps inspection; `render()` is sync and needs no hyper. |
 
-## Open Questions
-
+## Open Questions (RESOLVED)
 1. **Exact migration 0003 shape (index only vs index + `refresh_count`).**
    - What we know: `last_fetched_at`, `last_changed_at`, `fetch_count`, `change_count` already exist (0001) and `apply_follow_list` writes them. The staleness scan needs a `last_fetched_at` index that covers `fetched` rows (the existing partial index excludes them).
    - What's unclear: whether FRESH-03 wants a `refresh_count` semantically distinct from `fetch_count` (re-fetches after staleness vs. all fetches). The current `fetch_count` counts every fetch including the initial one.

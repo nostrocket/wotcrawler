@@ -133,6 +133,25 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. An HTTP liveness/readiness endpoint reports daemon health to a supervisor, structured tracing logs at configurable levels, and periodic progress summaries (frontier size, fetch rate, coverage %) appear during a long crawl.
   5. Sending a shutdown signal drains in-flight work and leaves the database in a consistent state with no orphaned leases.
 
+**Plans**: 5 plans
+
+**Wave 1**
+
+  - [ ] 04-01-PLAN.md — Deps + crawler bin + index-only migration 0003 + frontier staleness/in-run reclaim sweeps + Wave 0 test scaffolds (FRESH-02, FRESH-03, OPS-02)
+
+**Wave 2** *(blocked on Wave 1; 04-02 and 04-03 run in parallel — disjoint files)*
+
+  - [ ] 04-02-PLAN.md — Config struct + TOML/env load + fail-fast validation + config.example.toml (OPS-01)
+  - [ ] 04-03-PLAN.md — Observability surface: recorder install, tracing init, axum /metrics + /health/*, Grafana dashboard (OBS-01, OBS-02, OBS-03, OBS-05)
+
+**Wave 3** *(blocked on Wave 2)*
+
+  - [ ] 04-04-PLAN.md — run_daemon_loop (continuous cancellation-aware crawl) + sampler (gauges/progress/staleness/reclaim timers) + FRESH-03 churn-on-change test (FRESH-02, FRESH-03, OBS-04, OPS-02)
+
+**Wave 4** *(blocked on Wave 3; wires everything into the binary)*
+
+  - [ ] 04-05-PLAN.md — main.rs entry + daemon::run orchestrator (bootstrap, production fetch_union fan-out, signal→token graceful shutdown) + live-run checkpoint (OPS-01, OPS-02, OBS-01..04, FRESH-02)
+
 ### Phase 5: NIP-65 Outbox Routing & Relay Health
 
 **Goal**: Pubkeys the curated set cannot supply are recovered via their advertised NIP-65 write relays, and observed relay behavior drives routing and per-relay concurrency so the crawler steers around degraded relays.
@@ -154,5 +173,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 1. Schema & Data Contract | 3/3 | Complete   | 2026-06-12 |
 | 2. Relay Acquisition & Validation | 12/12 | Complete    | 2026-06-13 |
 | 3. Graph Writer & BFS Frontier | 3/3 | Complete    | 2026-06-13 |
-| 4. Daemon, Staleness Loop & Observability | 0/TBD | Not started | - |
+| 4. Daemon, Staleness Loop & Observability | 0/5 | Not started | - |
 | 5. NIP-65 Outbox Routing & Relay Health | 0/TBD | Not started | - |
