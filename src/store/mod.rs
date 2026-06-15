@@ -11,6 +11,7 @@
 
 pub mod follows;
 pub mod pubkeys;
+pub mod relays;
 
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;

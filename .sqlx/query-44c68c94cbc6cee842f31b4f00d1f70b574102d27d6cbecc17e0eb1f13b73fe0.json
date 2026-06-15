@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO pubkey_relays (pubkey_id, url, marker, seen_at) VALUES ($1, $2, $3, $4) ON CONFLICT (pubkey_id, url) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "44c68c94cbc6cee842f31b4f00d1f70b574102d27d6cbecc17e0eb1f13b73fe0"
+}

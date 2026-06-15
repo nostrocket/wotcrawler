@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM pubkey_relays WHERE pubkey_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "46923d75ba8809b75cf918bf8a964499936ccccb3b5247a425ed08bb82ab4aa8"
+}
