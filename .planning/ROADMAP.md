@@ -17,7 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Relay Acquisition & Validation** - Curated relay pool with backoff/NIP-11 awareness feeding a signature-verifying, replaceable-event-resolving validator (verification passed 9/9 + live-relay UAT passed 2026-06-13, see 02-VERIFICATION.md) (completed 2026-06-13)
 - [x] **Phase 3: Graph Writer & BFS Frontier** - Transactional edge-diff writer and DB-resident reachability-gated BFS frontier that survives restarts (completed 2026-06-13)
 - [x] **Phase 4: Daemon, Staleness Loop & Observability** - One long-running daemon with TTL-driven refresh and the metrics/logging/health surface an operator trusts unattended (completed 2026-06-15)
-- [ ] **Phase 5: NIP-65 Outbox Routing & Relay Health** - kind:10002 routing-table fallback for missed pubkeys plus per-relay health scoring driving routing and concurrency
+- [x] **Phase 5: NIP-65 Outbox Routing & Relay Health** - kind:10002 routing-table fallback for missed pubkeys plus per-relay health scoring driving routing and concurrency (completed 2026-06-15)
 
 ## Phase Details
 
@@ -176,7 +176,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 3** *(blocked on 05-02 + 05-03; the only routing site)*
 
-  - [ ] 05-04-PLAN.md — Health-driven fan-out (skip-below-threshold + probe) + per-relay Semaphore admission gate + deadlock-safe acquisition order + fetch-arm health capture + curated-only health/concurrency gauges + Grafana panels (RELAY-06)
+  - [x] 05-04-PLAN.md — Health-driven fan-out (skip-below-threshold + probe) + per-relay Semaphore admission gate + deadlock-safe acquisition order + fetch-arm health capture + curated-only health/concurrency gauges + Grafana panels (RELAY-06)
 
 ## Progress
 
@@ -189,4 +189,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Relay Acquisition & Validation | 12/12 | Complete    | 2026-06-13 |
 | 3. Graph Writer & BFS Frontier | 3/3 | Complete    | 2026-06-13 |
 | 4. Daemon, Staleness Loop & Observability | 5/5 | Complete    | 2026-06-15 |
-| 5. NIP-65 Outbox Routing & Relay Health | 3/4 | In Progress|  |
+| 5. NIP-65 Outbox Routing & Relay Health | 4/4 | Complete   | 2026-06-15 |
