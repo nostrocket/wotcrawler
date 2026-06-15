@@ -26,7 +26,23 @@ findings:
   warning: 4
   info: 2
   total: 9
-status: issues_found
+status: resolved
+resolution:
+  fixed: [CR-01, CR-02, CR-03, WR-01, WR-02, WR-03]
+  skipped: [WR-04, IN-01, IN-02]
+  resolved_at: 2026-06-15T00:00:00Z
+  note: >
+    All Critical + Warning findings resolved except WR-04, which is a
+    false positive given the current paginate_chunk FnMut(Filter) -> Fut
+    contract: the suggested fix (construct the fetch future inside the
+    async block after registry.acquire) cannot compile because a borrow
+    of the FnMut-captured `fetch` would escape the closure body. The
+    existing pattern is functionally correct (futures are lazy; the SDK's
+    fetch_events sends on first poll, which is after acquire). IN-01/IN-02
+    are Info-only and out of scope. Build (--all-targets, --bin crawler)
+    and tests (relay_health, nip65_fallback, daemon_loop, frontier,
+    graph_writer) all green; added CR-01 saturation + CR-02 single-probe
+    regression tests.
 ---
 
 # Phase 5: Code Review Report
