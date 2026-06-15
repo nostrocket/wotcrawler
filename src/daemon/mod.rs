@@ -14,5 +14,10 @@
 //!   `/health/ready` endpoints, periodic crawl-progress summaries, and a committed
 //!   Grafana dashboard.
 //!
-//! Submodules (`config`, `observe`, `sampler`, `loop_`) are registered by later
-//! Phase 4 plans (04-02..04-05); this is the module root keystone (04-01).
+//! Submodules (`config`, `observe`, `sampler`, `loop_`) are registered as their
+//! owning Phase 4 plans land; this is the module root keystone (04-01).
+
+/// Daemon configuration: layered TOML + `WOT__*` env load and fail-fast
+/// validation (OPS-01). See [`config::Config`], [`config::load_config`],
+/// [`config::validate`].
+pub mod config;

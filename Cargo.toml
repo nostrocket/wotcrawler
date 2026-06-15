@@ -14,6 +14,10 @@ tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "signal", "
 thiserror = "2.0.18"
 anyhow = "1.0.102"
 config = "0.15.23"
+# Direct dep for the daemon Config struct (OPS-01, CLAUDE.md stack table). Pinned
+# to the version already resolved transitively via nostr-sdk; `derive` enables
+# `#[derive(Deserialize)]`.
+serde = { version = "1.0.228", features = ["derive"] }
 # Phase 4 daemon (OPS-01): CLI flags + config load, structured logging, the
 # Prometheus recorder for the existing metrics!() sites, the axum metrics/health
 # server, a graceful-shutdown CancellationToken, and humantime duration config

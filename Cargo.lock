@@ -4199,6 +4199,7 @@ dependencies = [
  "nostr-sdk",
  "rand 0.9.4",
  "reqwest",
+ "serde",
  "sqlx",
  "testcontainers",
  "testcontainers-modules",
