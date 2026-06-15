@@ -20,7 +20,10 @@ From one anchor pubkey, maintain a complete and continuously fresh follow graph 
 - Observability: Prometheus `/metrics` (coverage, staleness distribution, relay health, frontier depth, fetch rate, validation failures), axum `/health/live` + `/health/ready`, `tracing` structured logs, periodic progress summaries, committed Grafana dashboard JSON — *Validated in Phase 4*
 - Per-pubkey churn capture (FRESH-03) accumulating to ground a future adaptive refresh policy — *Validated in Phase 4*
 
-> Note: Phase 4's two operator-UAT items (a live-relay crawl + Grafana dashboard render) are deferred to the operator — every automatable criterion passed in-session. Remaining Active work: NIP-65 outbox routing & relay-health-driven routing (Phase 5).
+- Hybrid relay strategy: NIP-65 (kind:10002) write-relay fallback recovers pubkeys the curated set cannot supply (on-demand resolve + persist + re-validate), with a `nip65_recovered` metric quantifying the coverage gap — *Validated in Phase 5: NIP-65 Outbox Routing & Relay Health*
+- Relay-health-driven routing: per-relay EWMA health score (connect failures, timeouts, rate-limit hits, latency) that skips degraded relays (with periodic probe-to-recover) and scales per-relay concurrency so healthy relays get more traffic — *Validated in Phase 5*
+
+> Note: Phase 4's two operator-UAT items (a live-relay crawl + Grafana dashboard render) remain deferred to the operator and now also cover Phase 5's real-relay fallback/health-routing effectiveness — every automatable criterion across both phases passed in-session. The crawler/data-layer milestone (v1.0) is functionally complete.
 
 ### Active
 
@@ -86,4 +89,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-15 — Phase 4 (Daemon, Staleness Loop & Observability) complete*
+*Last updated: 2026-06-15 — Phase 5 complete; v1.0 milestone functionally complete*
