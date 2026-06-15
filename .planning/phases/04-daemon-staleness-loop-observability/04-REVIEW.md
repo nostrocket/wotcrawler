@@ -21,7 +21,12 @@ findings:
   warning: 4
   info: 1
   total: 7
-status: issues_found
+status: resolved
+resolution:
+  fixed: [CR-01, CR-02, WR-01, WR-02, WR-03, WR-04]
+  skipped: [IN-01]
+  skipped_reason: "IN-01 is Info-tier (out of Critical+Warning fix scope) — an optional clarifying comment; no behavioral change."
+  fixed_at: 2026-06-15
 ---
 
 # Phase 4: Code Review Report
@@ -41,7 +46,7 @@ Two critical issues were found: a `Timestamp::now()` frozen at daemon-spawn time
 
 ## Critical Issues
 
-### CR-01: `Timestamp::now()` frozen at daemon spawn — corrupts `last_fetched_at` for `not_found`/`failed` rows
+### CR-01: `Timestamp::now()` frozen at daemon spawn — corrupts `last_fetched_at` for `not_found`/`failed` rows  [RESOLVED — commit caf5124]
 
 **File:** `src/daemon/mod.rs:255`
 
@@ -80,7 +85,7 @@ Remove the `now: Timestamp` parameter from `run_daemon_loop`'s signature and fro
 
 ---
 
-### CR-02: `concurrency = 0` config deadlocks the crawl loop permanently
+### CR-02: `concurrency = 0` config deadlocks the crawl loop permanently  [RESOLVED — commit c682dfc]
 
 **File:** `src/daemon/config.rs:186` (validate), `src/daemon/loop_.rs:99`
 
@@ -103,7 +108,7 @@ The `reqs_per_second` guard already exists in `run()` at `mod.rs:158–159` but 
 
 ## Warnings
 
-### WR-01: `fetch_duration_seconds` histogram configured but never recorded — Grafana panel always empty
+### WR-01: `fetch_duration_seconds` histogram configured but never recorded — Grafana panel always empty  [RESOLVED — commit 04f0ff6]
 
 **File:** `src/daemon/observe.rs:61`, `ops/grafana-dashboard.json` panel 3
 
@@ -123,7 +128,7 @@ Alternatively, remove the constant, the bucket registration, and the Grafana pan
 
 ---
 
-### WR-02: Grafana counter queries missing `_total` suffix — relay health and ingest panels produce no data
+### WR-02: Grafana counter queries missing `_total` suffix — relay health and ingest panels produce no data  [RESOLVED — commit 2cfc7e1]
 
 **File:** `ops/grafana-dashboard.json:137,143,160,166,172,178`
 
@@ -149,7 +154,7 @@ metrics::counter!("in_run_reclaimed").increment(n);
 
 ---
 
-### WR-03: `loop_alive` never reset to `false` on shutdown — `/health/ready` stays 200 after the loop stops
+### WR-03: `loop_alive` never reset to `false` on shutdown — `/health/ready` stays 200 after the loop stops  [RESOLVED — commit a7c4d2a]
 
 **File:** `src/daemon/loop_.rs:92`, `src/daemon/observe.rs:193`
 
@@ -167,7 +172,7 @@ Ok(stats)
 
 ---
 
-### WR-04: Early drain abort on first `join_worker` error leaves remaining JoinHandles detached
+### WR-04: Early drain abort on first `join_worker` error leaves remaining JoinHandles detached  [RESOLVED — commit 38754d7]
 
 **File:** `src/daemon/loop_.rs:183–185`
 
@@ -205,7 +210,7 @@ Apply the same fix to the `idle-drain` path at lines 116–118 if you want symme
 
 ## Info
 
-### IN-01: Signal task JoinHandle silently dropped — intentional but worth documenting
+### IN-01: Signal task JoinHandle silently dropped — intentional but worth documenting  [SKIPPED — Info-tier, out of fix scope]
 
 **File:** `src/daemon/mod.rs:128–151`
 
