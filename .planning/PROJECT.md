@@ -16,7 +16,11 @@ From one anchor pubkey, maintain a complete and continuously fresh follow graph 
 - Durable graph state via transactional edge diffs (add/remove deltas, newest-wins idempotency on replaceable kind-3) persisted to the shared PostgreSQL schema — *Validated in Phase 3*
 - Crash-safe DB-resident frontier: claim/lease via `FOR UPDATE SKIP LOCKED`, startup reclaim of orphaned work, no re-fetch of completed lists; every terminal fetch state stamps freshness metadata — *Validated in Phase 3*
 
-> Note: the long-running daemon, staleness-driven refresh loop, and observability remain Active — Phase 3 delivers and proves the crawl/graph mechanics that those phases orchestrate.
+- Single configurable `crawler` daemon binary: initial crawl → continuous uniform-TTL staleness refresh over the same frontier; graceful SIGTERM/SIGINT drain with zero orphaned leases; TOML config (+ env overrides) with fail-fast validation — *Validated in Phase 4: Daemon, Staleness Loop & Observability* (live-relay run + Grafana render deferred to operator UAT)
+- Observability: Prometheus `/metrics` (coverage, staleness distribution, relay health, frontier depth, fetch rate, validation failures), axum `/health/live` + `/health/ready`, `tracing` structured logs, periodic progress summaries, committed Grafana dashboard JSON — *Validated in Phase 4*
+- Per-pubkey churn capture (FRESH-03) accumulating to ground a future adaptive refresh policy — *Validated in Phase 4*
+
+> Note: Phase 4's two operator-UAT items (a live-relay crawl + Grafana dashboard render) are deferred to the operator — every automatable criterion passed in-session. Remaining Active work: NIP-65 outbox routing & relay-health-driven routing (Phase 5).
 
 ### Active
 
@@ -82,4 +86,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-13 — Phase 3 (Graph Writer & BFS Frontier) complete*
+*Last updated: 2026-06-15 — Phase 4 (Daemon, Staleness Loop & Observability) complete*
