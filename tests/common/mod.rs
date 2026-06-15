@@ -333,6 +333,16 @@ pub fn relay_list_event(author_seed: u8, relays: &[(&str, &str)], created_at: u6
         .expect("signing a relay-list fixture event must succeed")
 }
 
+/// Build a `DateTime<Utc>` from a Unix-seconds count (the `seen_at` a relay-list
+/// store write requires). Mirrors `ingest::timestamp_to_datetime` for fixtures.
+pub fn dt(secs: i64) -> chrono::DateTime<chrono::Utc> {
+    use chrono::TimeZone;
+    chrono::Utc
+        .timestamp_opt(secs, 0)
+        .single()
+        .expect("fixture timestamp is in range")
+}
+
 /// Deterministic 32-byte pubkey from a single seed (mirrors concurrency::pk).
 pub fn pk(seed: u16) -> [u8; 32] {
     let mut k = [0u8; 32];
