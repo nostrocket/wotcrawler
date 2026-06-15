@@ -27,3 +27,9 @@ pub mod config;
 /// + `/health/live` + `/health/ready`. See [`observe::install_metrics`],
 /// [`observe::init_tracing`], [`observe::router`].
 pub mod observe;
+
+/// The continuous, cancellation-aware crawl loop (OPS-02 / FRESH-02 / CRAWL-04):
+/// reuses the Phase 3 crawl primitives and replaces `run_crawl`'s break-on-empty
+/// with idle-poll + a claim-boundary cancellation drain. See
+/// [`loop_::run_daemon_loop`]. (Named `loop_` because `loop` is a keyword.)
+pub mod loop_;
