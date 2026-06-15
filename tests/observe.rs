@@ -17,7 +17,8 @@ use tower::ServiceExt; // for `oneshot`
 use web_of_trust::daemon::config::LogFormat;
 use web_of_trust::daemon::observe::{
     self, AppState, METRIC_COVERAGE, METRIC_FETCH_DURATION, METRIC_FRONTIER_DEPTH,
-    METRIC_RELAY_ACTIVE, METRIC_RELAY_FAILURES, METRIC_STALENESS_AGE,
+    METRIC_NIP65_RECOVERED, METRIC_RELAY_ACTIVE, METRIC_RELAY_CONCURRENCY, METRIC_RELAY_FAILURES,
+    METRIC_RELAY_HEALTH, METRIC_STALENESS_AGE,
 };
 
 /// OBS-01: a local recorder, scoped via `metrics::with_local_recorder`, captures
@@ -178,6 +179,11 @@ fn dashboard_json_valid() {
         METRIC_STALENESS_AGE,
         METRIC_RELAY_FAILURES,
         METRIC_RELAY_ACTIVE,
+        // RELAY-05/06 panels: per-relay health + concurrency gauges + the recovery
+        // counter (referenced in PromQL as nip65_recovered_total — substring match).
+        METRIC_RELAY_HEALTH,
+        METRIC_NIP65_RECOVERED,
+        METRIC_RELAY_CONCURRENCY,
         // The existing validation-failure / relay-notice counter series.
         "ingest_invalid_signature",
         "ingest_unsolicited",

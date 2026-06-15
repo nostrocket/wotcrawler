@@ -8,8 +8,10 @@
 //! asserts == 1 (the `nip65_recovered` counter increments on that same hit; the
 //! returned count is the deterministic, recorder-free proxy).
 //!
-//! The deadlock-safety test (`no_deadlock_single_permit`) is the per-relay
-//! `Semaphore` concern and stays `#[ignore]` until 05-04.
+//! The deadlock-safety test (`no_deadlock_single_permit`) drives the per-relay
+//! `Semaphore` admission gate (`relay::health::admit_per_relay`) under the fixed
+//! global -> per-relay -> GCRA acquisition order at `per_relay_concurrency = 1`,
+//! proving the order is deadlock-free (05-04).
 //!
 //! Requires a running Docker daemon. Run with `-- --test-threads=2`; re-run once
 //! on a testcontainers container/port flake.
@@ -362,9 +364,100 @@ async fn on_demand_kind10002_resolves_then_recovers() {
 }
 
 /// RELAY-06: the global -> per-relay -> GCRA acquisition order is deadlock-free
-/// even at `per_relay_concurrency = 1`. Body lands in 05-04.
-#[tokio::test]
-#[ignore = "Wave 0 scaffold; body lands in 05-04"]
+/// even at `per_relay_concurrency = 1`.
+///
+/// Models the daemon's fan-out gating discipline exactly (the fan-out is a
+/// live-Client closure, so this drives the SAME `admit_per_relay` helper + the
+/// SAME acquisition order it uses): N concurrent batches, each holding a global
+/// crawl permit (mirroring `loop_.rs`), then fanning out across MULTIPLE relays —
+/// each gated through the per-relay `Semaphore::new(1)` admission gate, then a
+/// per-relay GCRA token — and a relay-URL-aware `ScriptedGraph` as the fetch. If
+/// the global -> per-relay -> GCRA order ever formed a cycle, a fan-out at
+/// `per_relay_concurrency = 1` would hang; the bounded timeout fails the test on
+/// a hang. A clean completion proves the order is deadlock-free.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn no_deadlock_single_permit() {
-    unimplemented!("05-04: deadlock-free fan-out at per_relay_concurrency=1");
+    use std::collections::HashMap;
+    use std::num::NonZeroU32;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use tokio::sync::Semaphore;
+    use web_of_trust::relay::health::admit_per_relay;
+    use web_of_trust::relay::rate_limit::{
+        RateLimiterRegistry, DEFAULT_BACKOFF_BASE, DEFAULT_BACKOFF_CAP,
+    };
+
+    const PER_RELAY_CONCURRENCY: usize = 1;
+    const RELAYS: [&str; 3] = ["wss://a.example", "wss://b.example", "wss://c.example"];
+
+    // Each relay holds the same author's kind-3 (the fetch content is irrelevant —
+    // the test asserts on COMPLETION, not on edges). The graph is relay-URL-aware.
+    let author = common::keys(7).public_key();
+    let kind3 = follows_event(7, &[8, 9], 1_000);
+    let placements: Vec<(&str, Vec<_>)> =
+        RELAYS.iter().map(|r| (*r, vec![kind3.clone()])).collect();
+    let graph = ScriptedGraph::with_relay(placements);
+
+    // Shared health + a FIXED-SIZE per-relay semaphore map (size 1 — the
+    // deadlock-prone case), exactly as the daemon builds them.
+    let health = Arc::new(RelayHealthRegistry::new(DEFAULT_HEALTH_ALPHA));
+    let per_relay_sems: Arc<HashMap<String, Arc<Semaphore>>> = Arc::new(
+        RELAYS
+            .iter()
+            .map(|r| (r.to_string(), Arc::new(Semaphore::new(PER_RELAY_CONCURRENCY))))
+            .collect(),
+    );
+    // Per-relay GCRA registry (the third gate), mirroring the daemon.
+    let registry = Arc::new(RateLimiterRegistry::with_params(
+        NonZeroU32::new(1000).unwrap(),
+        DEFAULT_BACKOFF_BASE,
+        DEFAULT_BACKOFF_CAP,
+    ));
+
+    // The GLOBAL crawl permit (loop_.rs:99) — acquired BEFORE the per-relay permit
+    // in every task, so the fixed order is: global -> per-relay -> GCRA -> fetch.
+    let global = Arc::new(Semaphore::new(2));
+
+    // Fan out 8 concurrent batches contending for 3 single-permit relays + 2
+    // global permits — the worst case for an ordering bug.
+    let mut handles = Vec::new();
+    for _ in 0..8 {
+        let health = Arc::clone(&health);
+        let per_relay_sems = Arc::clone(&per_relay_sems);
+        let registry = Arc::clone(&registry);
+        let global = Arc::clone(&global);
+        let relay_fetch = graph.relay_fetch_fn();
+        let author = author;
+        handles.push(tokio::spawn(async move {
+            // (global crawl permit) — held for the whole batch, as in loop_.rs.
+            let _g = global.acquire().await.expect("global never closed");
+            for r in RELAYS {
+                let sem = per_relay_sems.get(r).expect("relay has a semaphore");
+                let registry = Arc::clone(&registry);
+                let relay_fetch = relay_fetch.clone();
+                // (per-relay permit) -> (GCRA token) -> (fetch) inside admit.
+                let batch = vec![ClaimedAuthor {
+                    id: 0,
+                    pubkey: author.to_bytes().to_vec(),
+                }];
+                let _ = admit_per_relay(&health, sem, r, PER_RELAY_CONCURRENCY, || async {
+                    // GCRA token (third gate) BEFORE the fetch.
+                    registry.acquire(r).await?;
+                    relay_fetch(r.to_string(), batch.clone()).await
+                })
+                .await;
+            }
+        }));
+    }
+
+    // A hang = deadlock. A clean join within the bound = deadlock-free.
+    let all = async {
+        for h in handles {
+            h.await.expect("worker did not panic");
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(10), all)
+        .await
+        .expect("fan-out at per_relay_concurrency=1 must complete (no deadlock)");
 }
