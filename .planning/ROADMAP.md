@@ -16,7 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Schema & Data Contract** - PostgreSQL graph schema, sqlx store layer, versioned migrations, documented public contract (completed 2026-06-12)
 - [x] **Phase 2: Relay Acquisition & Validation** - Curated relay pool with backoff/NIP-11 awareness feeding a signature-verifying, replaceable-event-resolving validator (verification passed 9/9 + live-relay UAT passed 2026-06-13, see 02-VERIFICATION.md) (completed 2026-06-13)
 - [x] **Phase 3: Graph Writer & BFS Frontier** - Transactional edge-diff writer and DB-resident reachability-gated BFS frontier that survives restarts (completed 2026-06-13)
-- [ ] **Phase 4: Daemon, Staleness Loop & Observability** - One long-running daemon with TTL-driven refresh and the metrics/logging/health surface an operator trusts unattended
+- [x] **Phase 4: Daemon, Staleness Loop & Observability** - One long-running daemon with TTL-driven refresh and the metrics/logging/health surface an operator trusts unattended (completed 2026-06-15)
 - [ ] **Phase 5: NIP-65 Outbox Routing & Relay Health** - kind:10002 routing-table fallback for missed pubkeys plus per-relay health scoring driving routing and concurrency
 
 ## Phase Details
@@ -150,7 +150,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 4** *(blocked on Wave 3; wires everything into the binary)*
 
-  - [ ] 04-05-PLAN.md — main.rs entry + daemon::run orchestrator (bootstrap, production fetch_union fan-out, signal→token graceful shutdown) + live-run checkpoint (OPS-01, OPS-02, OBS-01..04, FRESH-02)
+  - [x] 04-05-PLAN.md — main.rs entry + daemon::run orchestrator (bootstrap, production fetch_union fan-out, signal→token graceful shutdown) + live-run checkpoint (OPS-01, OPS-02, OBS-01..04, FRESH-02)
 
 ### Phase 5: NIP-65 Outbox Routing & Relay Health
 
@@ -173,5 +173,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 1. Schema & Data Contract | 3/3 | Complete   | 2026-06-12 |
 | 2. Relay Acquisition & Validation | 12/12 | Complete    | 2026-06-13 |
 | 3. Graph Writer & BFS Frontier | 3/3 | Complete    | 2026-06-13 |
-| 4. Daemon, Staleness Loop & Observability | 4/5 | In Progress|  |
+| 4. Daemon, Staleness Loop & Observability | 5/5 | Complete   | 2026-06-15 |
 | 5. NIP-65 Outbox Routing & Relay Health | 0/TBD | Not started | - |

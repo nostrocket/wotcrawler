@@ -54,7 +54,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Operations
 
-- [ ] **OPS-01**: Single Rust daemon binary configured via config file (anchor pubkey, relay set, TTL, DB URL, concurrency caps)
+- [x] **OPS-01**: Single Rust daemon binary configured via config file (anchor pubkey, relay set, TTL, DB URL, concurrency caps)
 - [x] **OPS-02**: Graceful shutdown drains in-flight work and leaves DB state consistent
 
 ## v2 Requirements
@@ -116,7 +116,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | OBS-03 | Phase 4 | Complete |
 | OBS-04 | Phase 4 | Complete |
 | OBS-05 | Phase 4 | Complete |
-| OPS-01 | Phase 4 | Pending |
+| OPS-01 | Phase 4 | Complete |
 | OPS-02 | Phase 4 | Complete |
 
 **Coverage:**

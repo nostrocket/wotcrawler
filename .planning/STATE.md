@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
+status: verifying
 stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-06-15T04:34:56.257Z"
+last_updated: "2026-06-15T04:45:40.692Z"
 last_activity: 2026-06-15 -- Phase 4 execution started
 progress:
   total_phases: 5
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 23
-  completed_plans: 22
-  percent: 60
+  completed_plans: 23
+  percent: 80
 ---
 
 # Project State
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 
 Phase: 4 (daemon-staleness-loop-observability) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-06-15 -- Phase 4 execution started
 
 Progress: [████░░░░░░] 40% (2/5 phases)
@@ -76,6 +76,7 @@ Progress: [████░░░░░░] 40% (2/5 phases)
 | Phase 04 P02 | 9 | 2 tasks | 6 files |
 | Phase 04 P03 | 5 | 2 tasks | 6 files |
 | Phase 04 P04 | 21 | 3 tasks | 5 files |
+| Phase 04 P05 | 6min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -114,6 +115,9 @@ Recent decisions affecting current work:
 - [Phase ?]: /metrics rendered from the shared axum server via PrometheusHandle::render() — no http-listener second hyper server (04-03)
 - [Phase ?]: run_daemon_loop reuses run_crawl primitives verbatim; only loop control is new (idle-poll + claim-boundary cancel drain)
 - [Phase ?]: Sampler gauges are aggregate-only on a coarse interval; relay-health gauge is the MAX failure count across the curated set
+- [Phase ?]: [04-05] Daemon fetch_union fans out the RAW fetch_complete_with_timeout per curated relay and concatenates events so process_batch ingests ONCE over the cross-relay union (D-08) — never per relay; per-relay success resets that relay's backoff.
+- [Phase ?]: [04-05] Per-batch ingest literals (Kind::ContactList, future_clamp 3600s, follow_cap 10000, max_authors=DEFAULT_MAX_LIMIT) are local consts in daemon/mod.rs (no config field); values mirror the Phase 3 crawl tests.
+- [Phase ?]: [04-05] Graceful shutdown: signal -> shared CancellationToken; loop stops claiming and drains in-flight workers to terminal status (zero orphaned in_progress); axum with_graceful_shutdown + all tasks joined under a bounded SHUTDOWN_TIMEOUT (Pitfall 8). Verified live: SIGTERM drained the claimed lease to terminal not_found, 0 in_progress remaining.
 
 ### Pending Todos
 
@@ -134,6 +138,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-15T04:34:38.687Z
+Last session: 2026-06-15T04:45:21.683Z
 Stopped at: Completed 04-01-PLAN.md
 Resume file: None
