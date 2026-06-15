@@ -223,7 +223,7 @@ where
 /// Join one spawned worker, flattening the JoinError (panic/cancel) and the
 /// inner `StoreError` into a single `StoreError`. A worker panic is surfaced as a
 /// store error rather than silently swallowed.
-async fn join_worker(
+pub(crate) async fn join_worker(
     handle: tokio::task::JoinHandle<Result<(), StoreError>>,
 ) -> Result<(), StoreError> {
     match handle.await {

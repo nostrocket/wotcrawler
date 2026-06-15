@@ -4,12 +4,30 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.94"
 
+[[bin]]
+name = "crawler"
+path = "src/main.rs"
+
 [dependencies]
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "macros", "migrate", "chrono"] }
-tokio = { version = "1.52", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "signal", "time"] }
 thiserror = "2.0.18"
 anyhow = "1.0.102"
 config = "0.15.23"
+# Phase 4 daemon (OPS-01): CLI flags + config load, structured logging, the
+# Prometheus recorder for the existing metrics!() sites, the axum metrics/health
+# server, a graceful-shutdown CancellationToken, and humantime duration config
+# fields. Versions verified in 04-RESEARCH §Package Legitimacy Audit.
+clap = { version = "4.6.1", features = ["derive"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json", "fmt"] }
+# default-features = false: the axum router owns the /metrics route, so the
+# exporter's built-in HTTP listener feature stays OFF — it only provides the
+# recorder handle that the existing metrics!() sites emit into.
+metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
+axum = "0.8.9"
+tokio-util = { version = "0.7.18", features = ["rt"] }
+humantime-serde = "1.1.1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 nostr-sdk = "0.44"
 governor = "0.10"
@@ -26,3 +44,5 @@ rand = "0.9"
 [dev-dependencies]
 testcontainers = "0.27.3"
 testcontainers-modules = { version = "0.15.0", features = ["postgres"] }
+# `ServiceExt::oneshot` for in-process axum router tests (tests/observe.rs, 04-03).
+tower = "0.5"
