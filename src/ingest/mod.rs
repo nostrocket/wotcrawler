@@ -17,6 +17,7 @@
 //! submodule gates, and plan 02-04 calls [`ingest_events`] from the fetch path.
 
 pub mod follow_list;
+pub mod relay_list;
 pub mod replaceable;
 pub mod verify;
 
@@ -53,6 +54,38 @@ pub struct ValidatedFollowList {
     pub created_at: DateTime<Utc>,
     /// The deduplicated, self-filtered, capped set of followed pubkeys.
     pub followee_pubkeys: Vec<PublicKey>,
+}
+
+/// The Phase 5 companion contract to [`ValidatedFollowList`]: a verified,
+/// newest-wins kind:10002 (NIP-65) relay list ready to hand to the store writer.
+///
+/// Where [`ValidatedFollowList`] carries the winning event's p-tag *pubkeys*,
+/// this carries its r-tag *relay urls* + read/write markers — the relay hints
+/// that [`ValidatedFollowList`] deliberately discards at the ingest boundary
+/// (see the [`ingest_events`] doc comment). It is produced by
+/// [`relay_list::from_event`] from the same `pick_winner` winner and the three
+/// fields map onto `store::relays::apply_relay_list`:
+/// - [`pubkey`](Self::pubkey) -> resolved to `pubkey_id` via
+///   `store::pubkeys::upsert_pubkey` by the caller.
+/// - [`event_id`](Self::event_id) -> the winning replaceable event's id (kept
+///   for symmetry with [`ValidatedFollowList`]; the relay write is a full
+///   newest-wins replace rather than an event-id idempotency short-circuit).
+/// - [`created_at`](Self::created_at) -> `apply_relay_list`'s `seen_at`,
+///   converted from the nostr `Timestamp` via [`timestamp_to_datetime`].
+/// - [`relays`](Self::relays) -> the `(url, marker)` pairs persisted as rows; a
+///   bare r-tag maps to the `"both"` marker (NIP-65 default).
+#[derive(Debug, Clone)]
+pub struct ValidatedRelayList {
+    /// The author of the winning relay-list event (kind 10002).
+    pub pubkey: PublicKey,
+    /// The winning replaceable event's id (newest-wins, lowest-id tie-break).
+    pub event_id: EventId,
+    /// The winning event's `created_at`, converted to the `DateTime<Utc>` the
+    /// store writer requires for `seen_at`.
+    pub created_at: DateTime<Utc>,
+    /// The extracted `(url, marker)` pairs; `marker` is one of `"read"`,
+    /// `"write"`, `"both"` (a bare r-tag = both, per NIP-65).
+    pub relays: Vec<(String, &'static str)>,
 }
 
 /// Convert a nostr `Timestamp` (seconds since the Unix epoch) to the
