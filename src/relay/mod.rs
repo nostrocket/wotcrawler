@@ -276,6 +276,12 @@ pub fn handle_relay_message(
         }
         NoticeKind::Blocked => {
             let _ = registry.record_notice(relay_url, message);
+            // RELAY-06 / WR-03: `blocked` is a harder stop signal than
+            // `rate-limited` — the relay does not want our traffic at all — so
+            // degrade health at least as aggressively. Use the strongest degrade
+            // (sample 0.0, like a connect failure) so routing skips the relay
+            // until a probe is due, mirroring (and exceeding) the RateLimited arm.
+            health.record_connect_failure(relay_url);
         }
         NoticeKind::Other => {}
     }
