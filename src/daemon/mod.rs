@@ -41,11 +41,13 @@ pub mod loop_;
 /// [`sampler::staleness_timer`], [`sampler::in_run_reclaim_timer`].
 pub mod sampler;
 
+use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
 
 use nostr_sdk::{Kind, PublicKey};
+use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 use crate::daemon::config::Config;
@@ -176,6 +178,24 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
         spawn_notice_consumer(client.clone(), Arc::clone(&registry), Arc::clone(&health));
     let limit_cache = Arc::new(LimitCache::new());
 
+    // RELAY-06 per-relay admission semaphores: one FIXED-SIZE
+    // `Semaphore::new(per_relay_concurrency)` per curated relay url, built once
+    // and cloned into the fan-out closure. `tokio::Semaphore` cannot shrink
+    // (Pitfall 5), so this is the hard ceiling; the health score scales EFFECTIVE
+    // concurrency down via the `in_use` admission gate in
+    // [`crate::relay::health::admit_per_relay`], never by resizing the semaphore.
+    let per_relay_sems: Arc<HashMap<String, Arc<Semaphore>>> = Arc::new(
+        cfg.relays
+            .iter()
+            .map(|r| {
+                (
+                    r.clone(),
+                    Arc::new(Semaphore::new(cfg.per_relay_concurrency)),
+                )
+            })
+            .collect(),
+    );
+
     // The closure fans out the RAW fetch per curated relay and CONCATENATES the
     // raw events (D-08): `process_batch` runs ONE ingest pass over the whole
     // cross-relay union, so a relay cannot split a pubkey's events across relays
@@ -186,12 +206,18 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
         let relays = cfg.relays.clone();
         let registry = Arc::clone(&registry);
         let limit_cache = Arc::clone(&limit_cache);
+        let health = Arc::clone(&health);
+        let per_relay_sems = Arc::clone(&per_relay_sems);
         let fetch_timeout = cfg.fetch_timeout;
+        let relay_health_threshold = cfg.relay_health_threshold;
+        let per_relay_concurrency = cfg.per_relay_concurrency;
         move |batch: Vec<crate::crawl::frontier::ClaimedAuthor>| {
             let client = client.clone();
             let relays = relays.clone();
             let registry = Arc::clone(&registry);
             let limit_cache = Arc::clone(&limit_cache);
+            let health = Arc::clone(&health);
+            let per_relay_sems = Arc::clone(&per_relay_sems);
             async move {
                 // The set of authors this batch solicited.
                 let authors: Vec<PublicKey> = batch
@@ -202,24 +228,70 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
                     return Ok(Vec::new());
                 }
 
-                // Fan out per curated relay, concatenating raw events. Each relay's
-                // effective per-window cap is sourced from its NIP-11 limits
-                // (RELAY-02); a per-relay fetch failure surfaces as RelayError so the
-                // batch requeues rather than being treated as complete (D-09).
+                // Fan out per curated relay, concatenating raw events (D-08 single
+                // ingest over the union). RELAY-06 makes this health-driven:
+                //
+                // DEADLOCK-SAFE ACQUISITION ORDER (fixed EVERYWHERE — Pitfall 1):
+                //   global crawl permit (already held — acquired in
+                //   loop_.rs before this batch was spawned)
+                //     -> per-relay permit (admit_per_relay)
+                //       -> GCRA token (inside fetch_complete_with_timeout)
+                //         -> fetch
+                // A global permit is NEVER acquired while a per-relay permit is
+                // held, so the gates never form a cycle.
+                //
+                // (1) skip a relay below the health threshold unless a probe is due
+                //     (route_allowed), re-admitting recovered relays via the probe;
+                // (2) admit through the fixed per-relay Semaphore + health-scaled
+                //     in-use gate (admit_per_relay);
+                // (3) gate each window REQ behind the per-relay GCRA token
+                //     (fetch_complete_with_timeout);
+                // (4) record the per-relay outcome into the health registry at the
+                //     Ok/Err arms BEFORE propagating, so a per-relay error still
+                //     requeues the whole batch (D-09) but is observed first.
                 let mut union: Vec<nostr_sdk::Event> = Vec::new();
                 for relay_url in &relays {
+                    // (1) Skip a degraded relay unless a probe is due; mark the
+                    // attempt so the next skip window starts now.
+                    if !health.route_allowed(relay_url, relay_health_threshold) {
+                        continue;
+                    }
+                    health.mark_attempt(relay_url);
+
                     let max_limit = limit_cache.get_or_fetch(relay_url).await.max_limit;
-                    let events = fetch::fetch_complete_with_timeout(
-                        &client,
+                    let sem = per_relay_sems
+                        .get(relay_url)
+                        .expect("every curated relay has a per-relay semaphore");
+
+                    // (2)+(3) Admit through the per-relay gate, then run the
+                    // GCRA-gated fetch. Time the per-relay round-trip for the health
+                    // success-latency sample.
+                    let t0 = std::time::Instant::now();
+                    let outcome = crate::relay::health::admit_per_relay(
+                        &health,
+                        sem,
                         relay_url,
-                        &authors,
-                        WANT_KIND,
-                        max_limit,
-                        MAX_AUTHORS_PER_REQ,
-                        fetch_timeout,
-                        &registry,
+                        per_relay_concurrency,
+                        || {
+                            fetch::fetch_complete_with_timeout(
+                                &client,
+                                relay_url,
+                                &authors,
+                                WANT_KIND,
+                                max_limit,
+                                MAX_AUTHORS_PER_REQ,
+                                fetch_timeout,
+                                &registry,
+                            )
+                        },
                     )
-                    .await?;
+                    .await;
+                    let latency = t0.elapsed();
+
+                    // (4) Record health at the Ok/Err arms BEFORE propagating.
+                    fetch::record_fetch_health(&health, relay_url, latency, &outcome);
+
+                    let events = outcome?;
                     // A fully-successful per-relay fetch clears that relay's backoff.
                     registry.reset(relay_url);
                     union.extend(events);

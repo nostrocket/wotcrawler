@@ -37,8 +37,12 @@
 //! Implemented in plan 05-02 Task 1.
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+
+use tokio::sync::Semaphore;
 
 /// Default EWMA smoothing factor in `(0, 1]`. Conservative — slower to react
 /// (more memory) so a single blip does not whipsaw routing (05-RESEARCH A1).
@@ -213,4 +217,75 @@ impl RelayHealthRegistry {
             .expect("health probe map not poisoned")
             .insert(relay.to_string(), Instant::now());
     }
+}
+
+/// Run `fetch` under the deadlock-safe per-relay admission gate (RELAY-06,
+/// Pattern 8 + Pitfall 1).
+///
+/// This is the single per-relay admission point shared by the daemon fan-out and
+/// the deadlock-safety test, so the acquisition order is identical everywhere.
+///
+/// ACQUISITION ORDER (fixed EVERYWHERE — Pitfall 1, deadlock-safe):
+/// **global crawl permit (held by the caller, acquired in `loop_.rs` before the
+/// batch is spawned) → per-relay permit (acquired here) → GCRA token (acquired
+/// inside `fetch`) → fetch.** A global permit is NEVER acquired while a per-relay
+/// permit is held: the caller already holds the global permit before calling in.
+///
+/// The per-relay `Semaphore` is fixed-size (`per_relay_concurrency`, built once —
+/// `tokio::Semaphore` cannot shrink, Pitfall 5). Health scales EFFECTIVE
+/// concurrency via the `in_use` admission gate: the relay is admitted only while
+/// `in_use(relay) < permits(relay, per_relay_concurrency)` (a degraded relay's
+/// `permits` floors at 1 so a probe always gets through). `in_use` is incremented
+/// before the fetch and decremented on EVERY exit path (success or error) via the
+/// drop guard, so a failed fetch never leaks a slot.
+///
+/// `sem` is the per-relay semaphore for `relay`; the caller owns the
+/// `relay -> Semaphore` map and clones the relevant `Arc` in. Returns the fetch's
+/// result unchanged (the caller records health + decides requeue semantics).
+pub async fn admit_per_relay<F, Fut, T, E>(
+    health: &RelayHealthRegistry,
+    sem: &Arc<Semaphore>,
+    relay: &str,
+    per_relay_concurrency: usize,
+    fetch: F,
+) -> Result<T, E>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+{
+    // (per-relay permit) The fixed-size semaphore bounds the hard ceiling; it is
+    // acquired AFTER the caller's global crawl permit and BEFORE the GCRA token
+    // inside `fetch` (deadlock-safe order). The permit is released when `_permit`
+    // drops at end of scope.
+    let _permit = sem
+        .acquire()
+        .await
+        .expect("per-relay semaphore is never closed");
+
+    // (health-scaled admission gate) Spin until the effective, health-scaled slot
+    // count admits this relay. `permits` floors at 1, so a healthy or degraded
+    // relay always eventually admits; a relay at its scaled ceiling yields to let
+    // an in-flight fetch finish. No lock is held across the await.
+    loop {
+        if health.in_use(relay) < health.permits(relay, per_relay_concurrency) as u32 {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+
+    health.incr_in_use(relay);
+    // Decrement on EVERY exit path (success OR error) — a drop guard so an early
+    // return / panic in `fetch` cannot leak an in-use slot.
+    struct InUseGuard<'a> {
+        health: &'a RelayHealthRegistry,
+        relay: &'a str,
+    }
+    impl Drop for InUseGuard<'_> {
+        fn drop(&mut self) {
+            self.health.decr_in_use(self.relay);
+        }
+    }
+    let _guard = InUseGuard { health, relay };
+
+    fetch().await
 }
