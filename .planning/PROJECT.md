@@ -8,6 +8,19 @@ A continuously running crawler and data layer that turns nostr's scattered, adve
 
 From one anchor pubkey, maintain a complete and continuously fresh follow graph of everyone reachable through follows — fetched from the wild efficiently (each list roughly once, refreshed only when stale) — so a downstream trust/spam layer can read it from a shared database at any time.
 
+## Current Milestone: v1.1 Containerized Deployment
+
+**Goal:** Make the crawler runnable as a self-contained Docker stack — one command brings up Postgres + the crawler, fully configured, with clear access to live logs for debugging.
+
+**Target features:**
+- Dockerfile for the `crawler` binary (multi-stage Rust build → slim runtime image)
+- docker-compose stack: Postgres (persistent named volume) + crawler, wired together, migrations auto-applied on startup, Postgres port exposed for the downstream spam layer
+- Env-var configuration via compose / `.env` using the existing `WOT__*` overrides; `database_url` injected as a secret, never baked into the image
+- Documented live-logs / debugging workflow (structured stdout logs, `docker compose logs -f`, `/metrics` + `/health/*` access)
+- "Run with Docker" docs in the README
+
+**Scope:** Local build only (no registry/CI publish); single-operator self-hosting; no change to crawl behavior. Preserves the cross-process DB boundary — Postgres reachable by the separate spam-layer process via a read-only role per `SCHEMA.md`.
+
 ## Requirements
 
 ### Validated
@@ -48,7 +61,7 @@ From one anchor pubkey, maintain a complete and continuously fresh follow graph 
 - Constant-time pubkey → spam-verdict lookup — product of the spam layer, not the data layer
 - Content moderation or event-content analysis — the system works entirely from social structure (kind 3, NIP-65), never note content
 - Multi-anchor support — single trusted anchor pubkey is the model; revisit only if the spam layer demands it
-- Polished deployment for third parties (Docker images, install docs) — single-operator infrastructure; config file + README is enough
+- Publishing/distributing images for third parties (registry pushes, CI image publish, multi-host install tooling) — single-operator infrastructure. *(Note: single-operator Docker containerization moved INTO scope for v1.1 — local build via docker-compose; registry/CI publishing remains out.)*
 
 ## Context
 
@@ -98,4 +111,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-16 after v1.0 milestone*
+*Last updated: 2026-06-16 — started v1.1 Containerized Deployment milestone*
