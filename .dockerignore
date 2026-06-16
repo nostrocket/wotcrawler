@@ -1,0 +1,23 @@
+# Build-context exclusions for the crawler image (IMAGE-03 / CONFIG-02).
+#
+# Required exclusions (D-11): build artifacts + local/secret config must never
+# enter the build context, so they can never be baked into the image.
+target/
+config.toml
+config.*.toml
+.env
+
+# Additional exclusions (D-12): large, build-irrelevant trees kept out of the
+# cargo-chef `COPY . .` context to keep transfers small.
+.git/
+.planning/
+
+# NOTE (D-12, intentional): the `config.*.toml` glob above also matches the
+# committed, non-secret `config.example.toml`. This is deliberate for Phase 6 —
+# the build does not need `config.example.toml` in-context, so no narrower
+# negation is added to re-include it.
+#
+# CRITICAL: do NOT add exclusions for the offline sqlx metadata dir or the
+# migration sql dir. The builder stage compiles against the committed offline
+# query metadata with SQLX_OFFLINE=true, and the sqlx migrate embed macro reads
+# the migration sql directory at compile time. Excluding either breaks the build.
