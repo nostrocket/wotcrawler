@@ -2,9 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Containerized Deployment
-status: roadmap_ready
-last_updated: "2026-06-16T07:10:07.518Z"
-last_activity: 2026-06-16
+status: planning
+stopped_at: Phase 6 context gathered
+last_updated: "2026-06-16T08:08:52.010Z"
+last_activity: 2026-06-16 — v1.1 roadmap created (2 phases, 16/16 requirements mapped)
 progress:
   total_phases: 2
   completed_phases: 0
@@ -150,9 +151,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-16
-Stopped at: v1.1 roadmap created (Phases 6–7, 16/16 requirements mapped)
-Resume file: None
+Last session: 2026-06-16T08:08:52.001Z
+Stopped at: Phase 6 context gathered
+Resume file: .planning/phases/06-crawler-image-build-context/06-CONTEXT.md
 
 ## Operator Next Steps
 
