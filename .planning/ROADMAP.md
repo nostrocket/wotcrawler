@@ -40,7 +40,8 @@ Audit: [milestones/v1.0-MILESTONE-AUDIT.md](milestones/v1.0-MILESTONE-AUDIT.md) 
   1. Running `docker build` against the committed multi-stage Dockerfile produces a runnable crawler image, and the build needs no live DATABASE_URL — the builder stage compiles the release binary against the committed `.sqlx/` offline metadata.
   2. The runtime image carries only the release binary plus required runtime libraries — no Rust/cargo build toolchain — and inspecting the running image shows the crawler process runs as a non-root user.
   3. A committed `.dockerignore` excludes `target/`, local `config.toml` / `config.*.toml`, and `.env`, so those are absent from the build context and never baked into the image.
-**Plans**: TBD
+**Plans**: 1 plan
+- [ ] 06-01-PLAN.md — Multi-stage Dockerfile, .dockerignore, and .gitignore .env exclusion (IMAGE-01/02/03)
 
 ### Phase 7: Compose Stack & Operator Workflow
 **Goal**: The operator can bring up the full Postgres + crawler stack with one command, configure it entirely through environment variables (with the DB URL injected as a secret), watch live logs and reach metrics/health from the host, shut it down with a graceful drain, and follow README docs to do all of it — while the downstream spam layer can still connect to the same database read-only.
@@ -63,7 +64,7 @@ Audit: [milestones/v1.0-MILESTONE-AUDIT.md](milestones/v1.0-MILESTONE-AUDIT.md) 
 | 3. Graph Writer & BFS Frontier | v1.0 | 3/3 | Complete | 2026-06-13 |
 | 4. Daemon, Staleness Loop & Observability | v1.0 | 5/5 | Complete | 2026-06-15 |
 | 5. NIP-65 Outbox Routing & Relay Health | v1.0 | 4/4 | Complete | 2026-06-16 |
-| 6. Crawler Image & Build Context | v1.1 | 0/? | Not started | - |
+| 6. Crawler Image & Build Context | v1.1 | 0/1 | Not started | - |
 | 7. Compose Stack & Operator Workflow | v1.1 | 0/? | Not started | - |
 
 ## Deferred to operator UAT (v1.0)
