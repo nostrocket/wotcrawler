@@ -65,27 +65,28 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| IMAGE-01 | TBD | Pending |
-| IMAGE-02 | TBD | Pending |
-| IMAGE-03 | TBD | Pending |
-| COMPOSE-01 | TBD | Pending |
-| COMPOSE-02 | TBD | Pending |
-| COMPOSE-03 | TBD | Pending |
-| COMPOSE-04 | TBD | Pending |
-| COMPOSE-05 | TBD | Pending |
-| CONFIG-01 | TBD | Pending |
-| CONFIG-02 | TBD | Pending |
-| CONFIG-03 | TBD | Pending |
-| LOGS-01 | TBD | Pending |
-| LOGS-02 | TBD | Pending |
-| LOGS-03 | TBD | Pending |
-| DOCS-01 | TBD | Pending |
-| DOCS-02 | TBD | Pending |
+| IMAGE-01 | Phase 6 | Pending |
+| IMAGE-02 | Phase 6 | Pending |
+| IMAGE-03 | Phase 6 | Pending |
+| COMPOSE-01 | Phase 7 | Pending |
+| COMPOSE-02 | Phase 7 | Pending |
+| COMPOSE-03 | Phase 7 | Pending |
+| COMPOSE-04 | Phase 7 | Pending |
+| COMPOSE-05 | Phase 7 | Pending |
+| CONFIG-01 | Phase 7 | Pending |
+| CONFIG-02 | Phase 7 | Pending |
+| CONFIG-03 | Phase 7 | Pending |
+| LOGS-01 | Phase 7 | Pending |
+| LOGS-02 | Phase 7 | Pending |
+| LOGS-03 | Phase 7 | Pending |
+| DOCS-01 | Phase 7 | Pending |
+| DOCS-02 | Phase 7 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 16 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 16 ⚠️
+- Mapped to phases: 16 ✓ (Phase 6: 3 · Phase 7: 13)
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-16 for milestone v1.1 Containerized Deployment*
+*Traceability mapped: 2026-06-16 — Phases 6–7*

@@ -2,11 +2,11 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Containerized Deployment
-status: planning
+status: roadmap_ready
 last_updated: "2026-06-16T07:10:07.518Z"
 last_activity: 2026-06-16
 progress:
-  total_phases: 0
+  total_phases: 2
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,23 +17,23 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-11)
+See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** From one anchor pubkey, maintain a complete and continuously fresh follow graph of everyone reachable through follows — fetched efficiently — so a downstream trust/spam layer can read it from a shared database at any time.
-**Current focus:** Phase 5 — nip-65-outbox-routing-relay-health
+**Current focus:** v1.1 Containerized Deployment — Phase 6 (Crawler Image & Build Context) next.
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: Not started — roadmap defined (Phases 6–7)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-06-16 — Milestone v1.1 started
+Status: Roadmap ready, awaiting phase planning
+Last activity: 2026-06-16 — v1.1 roadmap created (2 phases, 16/16 requirements mapped)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 24
+- Total plans completed: 27 (v1.0)
 - Average duration: — min
 - Total execution time: — hours
 
@@ -88,6 +88,9 @@ Last activity: 2026-06-16 — Milestone v1.1 started
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
+- [Roadmap v1.1]: Two phases — Phase 6 (Crawler Image & Build Context: IMAGE-01/02/03) builds a minimal non-root image with a secret-free build context; Phase 7 (Compose Stack & Operator Workflow: COMPOSE-01..05, CONFIG-01/03, LOGS-01..03, DOCS-01/02) runs that image as a one-command Postgres+crawler stack with env-driven config, live logs/metrics/health, preserved DB boundary, and docs. Phase 7 depends on Phase 6.
+- [Roadmap v1.1]: CONFIG-02 (DB-URL-as-secret + `.env.example`) assigned to Phase 7 — it is a runtime secret-injection + docs concern (paired with DOCS-02); the build-context exclusion of `.env` lives in Phase 6's `.dockerignore` (IMAGE-03), so the two requirements stay non-overlapping.
+- [Roadmap v1.1]: v1.1 is deployment/ops tooling ONLY — no changes to crawl behavior, schema, relay logic, or the existing binary. The Dockerfile build needs no live DATABASE_URL (committed `.sqlx/` offline metadata); the container must bind `metrics_addr` to `0.0.0.0` (default `127.0.0.1:9100` is host-unreachable); graceful SIGTERM drain already exists in the daemon.
 - [Roadmap]: Schema-first ordering — the PostgreSQL schema is the spam layer's public API and gates all later work; migrations on hundreds of millions of rows are expensive to change later.
 - [Roadmap]: RELAY-05 (NIP-65 fallback) and RELAY-06 (relay health) kept in v1 per user override (research suggested deferring); both land in Phase 5, gated behind Phase 4 coverage metrics.
 - [Roadmap]: FRESH-04 (adaptive refresh) stays v2 — no public kind-3 churn data exists; needs weeks of FRESH-03 instrumentation first.
@@ -132,8 +135,9 @@ None yet.
 
 ### Blockers/Concerns
 
-- Curated relay set coverage (% of reachable pubkeys discoverable without NIP-65 fallback) is unknown until Phase 4 observability measures it — directly gates Phase 5 scope.
-- Initial full crawl is expected to take multiple days; resource profile at full scale (low millions of pubkeys) is unmeasured. Instrument early.
+- Container must bind `metrics_addr` to `0.0.0.0` for `/metrics` + `/health/*` to be host-reachable; the compiled default `127.0.0.1:9100` would be unreachable from the host (set via `WOT__METRICS_ADDR`).
+- Cross-process DB boundary must be preserved: published Postgres host port + the read-only `spam_layer` role per `SCHEMA.md` must work from a separate process, not just from inside the compose network.
+- Carried from v1.0: curated relay coverage % and full-scale resource profile remain unmeasured (operator UAT) — not in v1.1 scope but still open.
 
 ## Deferred Items
 
@@ -146,10 +150,10 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-15T10:20:53.282Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-06-16
+Stopped at: v1.1 roadmap created (Phases 6–7, 16/16 requirements mapped)
 Resume file: None
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Plan Phase 6 with `/gsd-plan-phase 6` (Crawler Image & Build Context).
