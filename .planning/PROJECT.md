@@ -25,16 +25,22 @@ From one anchor pubkey, maintain a complete and continuously fresh follow graph 
 
 > Note: Phase 4's two operator-UAT items (a live-relay crawl + Grafana dashboard render) remain deferred to the operator and now also cover Phase 5's real-relay fallback/health-routing effectiveness — every automatable criterion across both phases passed in-session. The crawler/data-layer milestone (v1.0) is functionally complete.
 
-### Active
+> All eight original v1.0 Active requirements shipped and are captured under **Validated** above (Phases 1–5). They are retained here as the v1.0 acceptance record:
+> - ✓ Crawler discovers all reachable pubkeys from a single configurable anchor — v1.0 (P3)
+> - ✓ Hybrid relay strategy: curated set + NIP-65 fallback — v1.0 (P2 acquisition, P5 fallback)
+> - ✓ Handles nostr realities: out-of-order / duplicate / replaceable newest-wins — v1.0 (P2)
+> - ✓ Freshness metadata + staleness-driven re-query (uniform TTL) — v1.0 (P3 stamping, P4 loop)
+> - ✓ Spam islands stay unexplored (structural reachability) — v1.0 (P3)
+> - ✓ Follow graph persists in a shared DB the spam layer reads independently — v1.0 (P1)
+> - ✓ Long-running daemon: initial crawl → continuous staleness refresh — v1.0 (P4)
+> - ✓ Observability: coverage / staleness / relay-health visible for unattended operation — v1.0 (P4)
 
-- [ ] Crawler discovers all pubkeys reachable through follows starting from a single configurable anchor pubkey
-- [ ] Crawler fetches kind-3 follow lists from public relays using a hybrid strategy: curated relay set as the workhorse, NIP-65 relay hints as fallback when a pubkey isn't found
-- [ ] Crawler handles nostr realities: events arrive out of order, in duplicate, with no canonical copy; kind 3 is replaceable — only the newest event per pubkey counts
-- [ ] Every pubkey's follow-list knowledge carries freshness metadata; relays are re-queried only when that knowledge ages out (staleness policy to be settled by research)
-- [ ] Crawl effort is never spent on pubkeys nobody in the reachable graph points to (spam islands stay unexplored)
-- [ ] The follow graph (pubkeys, directed follow edges, freshness metadata) persists in a shared database the separate spam layer can read independently
-- [ ] Runs as a long-running daemon: initial full crawl, then continuous staleness-driven refresh
-- [ ] Observability: operator can see crawl coverage, staleness distribution, and relay health well enough to trust the daemon unattended
+### Active (next milestone — v2 candidates)
+
+- [ ] FRESH-04: Adaptive per-pubkey refresh intervals derived from observed churn (needs weeks of FRESH-03 data, now being accumulated)
+- [ ] RELAY-07: NIP-77 negentropy bulk sync with supporting relays (~16% relay support today)
+- [ ] RELAY-08: Streaming live kind-3 subscriptions for near-real-time graph updates
+- [ ] Operator validation of the v1.0 daemon against real relays at scale (multi-day resource profile; curated-coverage % from `nip65_recovered`) — deferred operator UAT from v1.0
 
 ### Out of Scope
 
@@ -50,6 +56,7 @@ From one anchor pubkey, maintain a complete and continuously fresh follow graph 
 - **Adversarial setting**: spam farms manufacture fake accounts and follow relationships at scale. The downstream spam layer defeats this via mutual follows from a trusted anchor (the one relationship spammers can't cheaply fake) over a deliberately short walk. The crawler's job is to make that computation possible: complete directed-edge data, honestly aged.
 - **Scale**: full reachable set from a well-connected anchor — expect low millions of pubkeys and hundreds of millions of directed follow edges. Storage and access patterns must be designed for this from the start.
 - **Consumer contract**: the spam layer is a separate codebase that reads the shared database directly. The database schema is effectively this project's public API.
+- **Current state (post-v1.0, 2026-06-16)**: shipped the full crawler + data layer — ~5.2k LOC Rust src, ~6.1k LOC tests/migrations, 4 additive migrations (0001–0004), single `crawler` daemon binary. Stack: Rust 1.94, tokio 1.52, sqlx 0.9 (PostgreSQL), nostr-sdk 0.44, axum 0.8, metrics/Prometheus, tracing. All 29 v1.0 requirements satisfied and verified; cross-phase integration clean. Tests run on testcontainers Postgres (known port-exposure flake under full-suite parallelism — run per-binary). Deferred to operator: a live-relay run at scale + Grafana render.
 
 ## Constraints
 
@@ -63,13 +70,15 @@ From one anchor pubkey, maintain a complete and continuously fresh follow graph 
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Rust for the crawler | Performance/memory control at millions of nodes, strong async story for relay connections | — Pending |
-| Shared database as spam-layer boundary | Loose coupling between projects via schema; no API service to maintain | — Pending |
-| Full reachable set (no hop limit) | Crawl scope is structural reachability; the short trust walk lives in the spam layer, not the crawler | — Pending |
-| Hybrid relay strategy (curated set + NIP-65 fallback) | Curated relays catch most users cheaply; outbox hints recover the rest | — Pending |
-| Database engine: research to recommend | Postgres vs SQLite vs alternatives needs weighing against edge volume and cross-project read access | — Pending |
-| Staleness policy: research to recommend | Uniform TTL vs adaptive refresh needs grounding in real kind-3 update behavior | — Pending |
-| v1 includes observability | An unattended daemon you can't inspect can't be trusted; metrics are part of done, not a follow-up | — Pending |
+| Rust for the crawler | Performance/memory control at millions of nodes, strong async story for relay connections | ✓ Good — 5.2k LOC src, tokio daemon, clean async throughout |
+| Shared database as spam-layer boundary | Loose coupling between projects via schema; no API service to maintain | ✓ Good — schema is the public contract (3 views), spam layer reads DB directly |
+| Full reachable set (no hop limit) | Crawl scope is structural reachability; the short trust walk lives in the spam layer | ✓ Good — structural reachability via `upsert_pubkey`-on-followee, no recursive CTE |
+| Hybrid relay strategy (curated set + NIP-65 fallback) | Curated relays catch most users cheaply; outbox hints recover the rest | ✓ Good — manual fallback at the not_found hook (P5); `nip65_recovered` quantifies the gap |
+| Database engine: PostgreSQL | MVCC for concurrent spam-layer reads; COPY/upsert throughput; SQL as cross-project contract | ✓ Good — sqlx 0.9 raw-SQL-as-contract, .sqlx offline metadata, 4 additive migrations |
+| Staleness policy: uniform TTL (v1), adaptive later | Uniform TTL ships now; adaptive (FRESH-04) needs real churn data first | ✓ Good — uniform humantime TTL scanner; FRESH-03 churn columns accumulating for v2 |
+| v1 includes observability | An unattended daemon you can't inspect can't be trusted; metrics are part of done | ✓ Good — Prometheus /metrics + axum /health + tracing + Grafana JSON (P4) |
+| In-memory relay health (EWMA), not persisted | A multi-day daemon re-learns health quickly; a table adds write load for marginal benefit | ✓ Good — `RelayHealthRegistry` EWMA drives routing + per-relay concurrency (P5) |
+| Manual NIP-65 fallback, not nostr-sdk gossip(true) | Keeps the controllable/testable manual fetch path (pagination, rate limits, deterministic mocks) | ✓ Good — fallback is an injected closure, fully ScriptedGraph-testable |
 
 ## Evolution
 
@@ -89,4 +98,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-15 — Phase 5 complete; v1.0 milestone functionally complete*
+*Last updated: 2026-06-16 after v1.0 milestone*

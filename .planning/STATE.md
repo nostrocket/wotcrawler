@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
+status: Awaiting next milestone
 stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-06-15T10:45:57.089Z"
-last_activity: 2026-06-15
+last_updated: "2026-06-16T04:07:54.410Z"
+last_activity: 2026-06-16 — Milestone v1.0 completed and archived
 progress:
   total_phases: 5
   completed_phases: 5
@@ -25,12 +25,10 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 
 ## Current Position
 
-Phase: 05
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-06-15
-
-Progress: [████░░░░░░] 40% (2/5 phases)
+Phase: Milestone v1.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-06-16 — Milestone v1.0 completed and archived
 
 ## Performance Metrics
 
@@ -144,10 +142,15 @@ Items acknowledged and carried forward from previous milestone close:
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
-| *(none)* | | | |
+| uat | Phase 04 04-UAT.md (live-relay crawl run + Grafana dashboard render — operator validation) | deferred | 2026-06-16 (v1.0 close) |
+| verification | Phase 04 04-VERIFICATION.md (human_needed — operator UAT; all automatable criteria passed) | deferred | 2026-06-16 (v1.0 close) |
 
 ## Session Continuity
 
 Last session: 2026-06-15T10:20:53.282Z
 Stopped at: Completed 04-01-PLAN.md
 Resume file: None
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone
