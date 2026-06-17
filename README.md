@@ -126,6 +126,41 @@ The daemon serves an HTTP endpoint at `metrics_addr` (default
 > **Security:** binding `metrics_addr` to a public interface exposes internal
 > crawl topology. Keep it on loopback/private network and scrape it privately.
 
+## Run with Docker
+
+A multi-stage [`Dockerfile`](Dockerfile) builds a minimal, non-root runtime
+image from source — no live `DATABASE_URL` is needed at build time (the release
+binary compiles against committed offline `sqlx` metadata via `SQLX_OFFLINE`):
+
+```sh
+docker build -t wot-crawler .
+```
+
+The result is a ~16 MB [distroless](https://github.com/GoogleContainerTools/distroless)
+image: just the `crawler` binary on `gcr.io/distroless/cc-debian12:nonroot`,
+running as uid `65532` with no shell or package manager, and no Rust/cargo
+toolchain layers. `.dockerignore` keeps `target/`, local `config.*.toml`, and
+`.env` out of the build context.
+
+Run it by supplying a config file (mount it) and a reachable database. The
+image's entrypoint is the binary itself, so flags and `WOT__*` env overrides
+work exactly as they do for the native build:
+
+```sh
+docker run --rm \
+  -v "$PWD/config.toml:/config.toml:ro" \
+  -e WOT__DATABASE_URL='postgres://crawler:secret@db.internal:5432/web_of_trust' \
+  -p 9100:9100 \
+  wot-crawler --config /config.toml
+```
+
+The container has no shell — debug it via `docker logs` and the
+`/metrics` + `/health/*` endpoints, not an interactive shell.
+
+> A one-command Postgres + crawler **compose stack**, an `.env.example`, a
+> container healthcheck, and fuller operator docs are the next milestone
+> ([Phase 7](#roadmap--next-steps)) — the image above is the building block.
+
 ## Consuming the graph (downstream layer)
 
 The downstream spam/trust layer reads PostgreSQL directly — there is no API or
@@ -148,7 +183,48 @@ cargo sqlx prepare -- --all-targets   # regenerate offline query metadata after 
 
 ## Project status
 
-v1.0 (the crawler & data layer) is complete — schema/contract, relay acquisition
-+ validation, transactional graph writer + crash-safe BFS frontier, the
-unattended daemon with staleness loop + observability, and NIP-65 outbox routing
-+ relay health scoring. Planning artifacts live under `.planning/`.
+**v1.0 — Crawler & data layer: complete.** Schema/contract (Phase 1), relay
+acquisition + validation (Phase 2), transactional graph writer + crash-safe BFS
+frontier (Phase 3), the unattended daemon with staleness loop + observability
+(Phase 4), and NIP-65 outbox routing + relay health scoring (Phase 5).
+
+**v1.1 — Containerized deployment: in progress.** Phase 6 (crawler image &
+build context) is complete — see [Run with Docker](#run-with-docker). Phase 7
+(compose stack & operator workflow) is the remaining work.
+
+Full planning artifacts — roadmap, per-phase plans, summaries, and verification
+reports — live under [`.planning/`](.planning/). Start at
+[`.planning/ROADMAP.md`](.planning/ROADMAP.md) and
+[`.planning/STATE.md`](.planning/STATE.md) to resume work.
+
+## Roadmap & next steps
+
+For an engineer picking this up:
+
+**Next milestone — Phase 7: Compose Stack & Operator Workflow.** Build on the
+Phase 6 image to deliver:
+
+- A `docker-compose.yml` running a one-command Postgres + crawler stack, with
+  the crawler waiting on a healthy database.
+- Env-driven runtime config: an `.env.example` and `WOT__*` wiring so an
+  operator configures the stack without editing files inside the image.
+- A container `HEALTHCHECK` hitting `/health/ready`, and published metrics/health
+  ports for private scraping.
+- A "Run with Docker" / operator runbook expanding the section above.
+- Preserve the DB-as-contract boundary: the downstream layer connects to the
+  same Postgres with a read-only role (see [SCHEMA.md](SCHEMA.md)).
+
+**Verify the image build once on a healthy network.** The Phase 6 image was
+verified end-to-end, but a plain `docker build .` should be confirmed on a
+machine with normal `crates.io` / `static.rust-lang.org` access (some build
+environments throttle the in-build network and stall the toolchain download).
+
+**Hardening backlog (from code review, optional).**
+
+- Pin the build tool: `cargo install cargo-chef --version <x> --locked`.
+- Add `--locked` to `cargo chef cook --release` and `cargo build --release` in
+  the `Dockerfile` so a `Cargo.toml`/`Cargo.lock` drift fails the build loudly.
+
+**Beyond v1.1.** The graph this crawler maintains is the foundation for a
+separate trust/spam-scoring layer that propagates trust over the follow graph by
+reading the shared database directly.
