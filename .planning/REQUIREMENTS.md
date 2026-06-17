@@ -9,9 +9,9 @@ Requirements for the Containerized Deployment milestone. Each maps to a roadmap 
 
 ### Image
 
-- [ ] **IMAGE-01**: Operator can build the crawler image from source via a committed multi-stage Dockerfile (builder stage compiles the release binary; runtime stage carries only the binary + required runtime libraries).
-- [ ] **IMAGE-02**: The runtime image runs the crawler as a non-root user and contains no Rust build toolchain (minimal size and attack surface).
-- [ ] **IMAGE-03**: A `.dockerignore` excludes `target/`, local config, and `.env` so the build context is small and never bakes in secrets or local artifacts.
+- [x] **IMAGE-01**: Operator can build the crawler image from source via a committed multi-stage Dockerfile (builder stage compiles the release binary; runtime stage carries only the binary + required runtime libraries).
+- [x] **IMAGE-02**: The runtime image runs the crawler as a non-root user and contains no Rust build toolchain (minimal size and attack surface).
+- [x] **IMAGE-03**: A `.dockerignore` excludes `target/`, local config, and `.env` so the build context is small and never bakes in secrets or local artifacts.
 
 ### Compose
 
@@ -65,9 +65,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| IMAGE-01 | Phase 6 | Pending |
-| IMAGE-02 | Phase 6 | Pending |
-| IMAGE-03 | Phase 6 | Pending |
+| IMAGE-01 | Phase 6 | Satisfied (06-01) |
+| IMAGE-02 | Phase 6 | Satisfied (06-01) |
+| IMAGE-03 | Phase 6 | Satisfied (06-01) |
 | COMPOSE-01 | Phase 7 | Pending |
 | COMPOSE-02 | Phase 7 | Pending |
 | COMPOSE-03 | Phase 7 | Pending |

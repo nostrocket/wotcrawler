@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Containerized Deployment
-status: planning
-stopped_at: Phase 6 context gathered
-last_updated: "2026-06-16T08:40:57.579Z"
-last_activity: 2026-06-16 — v1.1 roadmap created (2 phases, 16/16 requirements mapped)
+status: executing
+stopped_at: Completed 06-01-PLAN.md
+last_updated: "2026-06-17T00:00:00.000Z"
+last_activity: 2026-06-17 -- Phase 06 Plan 01 complete (crawler image build context)
 progress:
   total_phases: 2
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  completed_phases: 1
+  total_plans: 1
+  completed_plans: 1
+  percent: 50
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** From one anchor pubkey, maintain a complete and continuously fresh follow graph of everyone reachable through follows — fetched efficiently — so a downstream trust/spam layer can read it from a shared database at any time.
-**Current focus:** v1.1 Containerized Deployment — Phase 6 (Crawler Image & Build Context) next.
+**Current focus:** Phase 06 complete (crawler image) — Phase 7 (Compose Stack & Operator Workflow) next.
 
 ## Current Position
 
-Phase: Not started — roadmap defined (Phases 6–7)
-Plan: —
-Status: Roadmap ready, awaiting phase planning
-Last activity: 2026-06-16 — v1.1 roadmap created (2 phases, 16/16 requirements mapped)
+Phase: 06 (crawler-image-build-context) — COMPLETE (1/1 plans)
+Plan: 1 of 1 complete
+Status: Phase 06 done; ready to plan Phase 07
+Last activity: 2026-06-17 -- Phase 06 Plan 01 complete (IMAGE-01/02/03 satisfied)
 
 ## Performance Metrics
 
@@ -81,6 +81,7 @@ Last activity: 2026-06-16 — v1.1 roadmap created (2 phases, 16/16 requirements
 | Phase 05 P02 | 6min | 3 tasks | 7 files |
 | Phase 05 P03 | 22min | 2 tasks tasks | 6 files files |
 | Phase 05 P04 | 30min | 5 tasks | 10 files |
+| Phase 06 P01 | 3min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -129,6 +130,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [05-03] RELAY-05 fallback wired at process_batch None arm via injected fallback_fetch + relay_list_fetch closures (apply.rs stays Client-free); on-demand curated kind:10002 resolve+persist is the sole persist-on-winner hook; a failed kind:10002 fetch does NOT consume the kind-3 retry budget (OQ1); recovery counted via nip65_recovered. run_crawl/run_daemon_loop pass fallback_enabled=false + no-op closures — live health-driven wiring is 05-04.
 - [Phase ?]: 05-04: admit_per_relay is the single shared per-relay admission gate (fixed Semaphore + health-scaled in-use gate + Drop-guard decrement) exercised by both the live fan-out and the no_deadlock_single_permit test under the global->per-relay->GCRA order
 - [Phase ?]: 05-04: per-relay health classification lives in relay::fetch::record_fetch_health; recorded at the fan-out Ok/Err arm BEFORE the ? requeue so a per-relay error still requeues the batch but is observed first
+- [Phase 06]: [06-01] IMAGE-01/02/03 satisfied. 4-stage cargo-chef Dockerfile (chef -> planner -> builder -> distroless cc-debian12:nonroot) compiles the crawler offline via SQLX_OFFLINE against committed .sqlx/ (no DATABASE_URL at build) and ships ONLY the binary as nonroot/uid 65532; verified 16.2 MB / 19 layers, no toolchain layers, `--help` runs, 24.12 kB context. .dockerignore excludes target/config/.env/.git/.planning but KEEPS .sqlx/ + migrations/. .env added to .gitignore (CONFIG-02 seed). ENTRYPOINT ["/crawler"] runnable-with-args (not self-starting); runtime config is Phase 7. Tag-pinned bases, no @sha256, rustls-only (no libssl). Env note: this Docker host's build-network is throttled (~1 MB/s) and stalls the 1.94.0 toolchain download — dynamic verify used a pre-seeded offline base building the IDENTICAL committed logic; run a plain `docker build .` once on a normally-networked host to confirm end-to-end.
 
 ### Pending Todos
 
@@ -151,10 +153,11 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-16T08:08:52.001Z
-Stopped at: Phase 6 context gathered
-Resume file: .planning/phases/06-crawler-image-build-context/06-CONTEXT.md
+Last session: 2026-06-17T00:00:00.000Z
+Stopped at: Completed 06-01-PLAN.md (Phase 6 complete)
+Resume file: None
 
 ## Operator Next Steps
 
-- Plan Phase 6 with `/gsd-plan-phase 6` (Crawler Image & Build Context).
+- Run a plain `docker build .` once on a normally-networked machine to confirm the image builds end-to-end (this host's build-network throttle blocked the toolchain download; logic verified via offline pre-seeded base — see 06-01-SUMMARY.md).
+- Plan Phase 7 with `/gsd-plan-phase 7` (Compose Stack & Operator Workflow).
